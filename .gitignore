@@ -1,17 +1,22 @@
 # Personal data (user fills these)
 cv.md
+article-digest.md
 data/applications.md
 data/applications.db
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
 data/follow-ups.md
 data/pipeline.md
 data/scan-history.tsv
 data/pdf-index.tsv
 data/agent-inbox.md
+data/deep-reviews/
 data/parser-output/**/*.json
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
 data/cache/ats-companies/
-reports/*.md
+reports/*
 !reports/.gitkeep
 output/*
 !output/.gitkeep
@@ -70,6 +75,7 @@ plugins.lock
 
 # Generated
 .resolved-prompt-*
+.career-ops-web/
 node_modules/
 bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)

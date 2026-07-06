@@ -28,6 +28,7 @@ export function StatusSelect({ n, current }: { n: string; current: string }) {
       if (!res.ok) throw new Error("write failed");
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      window.dispatchEvent(new CustomEvent("co-pipeline-changed"));
       router.refresh();
     } catch {
       setStatus(prev); // revert on failure

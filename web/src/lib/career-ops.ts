@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { atomicWrite } from "@/lib/core/safe-write";
 
 /**
@@ -44,13 +45,90 @@ function read(rel: string): string | null {
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string };
+export type InboxJob = {
+  id?: number;
+  url: string;
+  company: string;
+  role: string;
+  location?: string;
+  compensation?: string;
+  done: boolean;
+  postedAt?: string;
+  pipelineState?: "pending" | "shortlisted" | "processed" | "discarded" | "expired" | string;
+  status?: string;
+  score?: string;
+  notes?: string;
+  source?: string;
+  reportPath?: string;
+  pdfPath?: string;
+};
+
+export function postingDbPath(): string {
+  return path.join(careerOpsRoot(), "data", "career-ops.sqlite");
+}
+
+export function hasPostingDb(): boolean {
+  try {
+    return fs.existsSync(postingDbPath());
+  } catch {
+    return false;
+  }
+}
+
+function sqliteJson(sql: string): Array<Record<string, unknown>> {
+  const out = execFileSync("sqlite3", ["-json", postingDbPath(), sql], {
+    cwd: careerOpsRoot(),
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  }).trim();
+  if (!out) return [];
+  const parsed = JSON.parse(out);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function readSqliteInbox(): InboxJob[] | null {
+  if (!hasPostingDb()) return null;
+  try {
+    const rows = sqliteJson(`
+      SELECT id, url, company_name, title, location, compensation, first_seen,
+             pipeline_state, status, score, notes, source, report_path, pdf_path
+      FROM job_postings
+      WHERE pipeline_state IN ('pending', 'shortlisted')
+      ORDER BY
+        CASE pipeline_state WHEN 'shortlisted' THEN 0 ELSE 1 END,
+        COALESCE(first_seen, created_at) DESC,
+        company_name COLLATE NOCASE,
+        title COLLATE NOCASE
+    `);
+    return rows.map((r) => ({
+      id: Number(r.id),
+      done: false,
+      url: String(r.url ?? ""),
+      company: String(r.company_name ?? ""),
+      role: String(r.title ?? ""),
+      location: typeof r.location === "string" && r.location ? r.location : undefined,
+      compensation: typeof r.compensation === "string" && r.compensation ? r.compensation : undefined,
+      postedAt: typeof r.first_seen === "string" && r.first_seen ? r.first_seen : undefined,
+      pipelineState: typeof r.pipeline_state === "string" ? r.pipeline_state : undefined,
+      status: typeof r.status === "string" ? r.status : undefined,
+      score: typeof r.score === "string" ? r.score : undefined,
+      notes: typeof r.notes === "string" ? r.notes : undefined,
+      source: typeof r.source === "string" ? r.source : undefined,
+      reportPath: typeof r.report_path === "string" ? r.report_path : undefined,
+      pdfPath: typeof r.pdf_path === "string" ? r.pdf_path : undefined,
+    })).filter((j) => j.url && j.company && j.role);
+  } catch {
+    return null;
+  }
+}
 
 /** Parse data/pipeline.md — `- [ ] URL | Company | Role [| Location [| Compensation]]`.
  *  Positional split (NOT a greedy trailing group): the optional 4th `location`
  *  (#1015) and 5th `compensation` (#1017) columns must NOT bleed into `role`;
  *  any further trailing columns are ignored gracefully. */
 export function readInbox(): InboxJob[] {
+  const sqliteInbox = readSqliteInbox();
+  if (sqliteInbox) return sqliteInbox;
   const md = read("data/pipeline.md");
   if (!md) return [];
   const jobs: InboxJob[] = [];
@@ -109,12 +187,39 @@ export type Application = {
   notes: string;
 };
 
+function readSqliteApplications(): Application[] | null {
+  if (!hasPostingDb()) return null;
+  try {
+    const rows = sqliteJson(`
+      SELECT tracker_num, date, company, role, score, status, pdf, report, notes
+      FROM applications
+      ORDER BY tracker_num
+    `);
+    if (rows.length === 0) return null;
+    return rows.map((r) => ({
+      n: String(r.tracker_num ?? ""),
+      date: String(r.date ?? ""),
+      company: String(r.company ?? ""),
+      role: String(r.role ?? ""),
+      score: String(r.score ?? ""),
+      status: String(r.status ?? ""),
+      pdf: String(r.pdf ?? ""),
+      report: String(r.report ?? ""),
+      notes: String(r.notes ?? ""),
+    })).filter((r) => r.n && r.company && r.role);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Parse data/applications.md — the tracker table (source of truth).
  * Column order: # | Date | Company | Role | Score | Status | PDF | Report | Notes
  * (note: score BEFORE status, per the core data contract).
  */
 export function readApplications(): Application[] {
+  const sqliteApplications = readSqliteApplications();
+  if (sqliteApplications) return sqliteApplications;
   const md = read("data/applications.md");
   if (!md) return [];
   const rows: Application[] = [];

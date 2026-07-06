@@ -14,7 +14,8 @@ import { cn } from "@/lib/cn";
 // INBOX (the triage queue) is the default tab; the rest filter the tracker.
 const TABS = [
   "INBOX",
-  "ALL",
+  "SHORTLIST",
+  "APPLICATIONS",
   "EVALUATED",
   "APPLIED",
   "RESPONDED",
@@ -44,7 +45,8 @@ export function PipelineView({
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
   // the table identically (no useState mirror → no desync).
   const pTab = (params.get("tab") ?? "").toUpperCase();
-  const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "INBOX";
+  const normalizedTab = pTab === "ALL" ? "APPLICATIONS" : pTab;
+  const tab: Tab = (TABS as readonly string[]).includes(normalizedTab) ? (normalizedTab as Tab) : "INBOX";
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
@@ -83,6 +85,19 @@ export function PipelineView({
     const out: InboxJob[] = [];
     for (const j of inbox) {
       if (j.done || seen.has(j.url)) continue;
+      if (j.pipelineState && j.pipelineState !== "pending") continue;
+      seen.add(j.url);
+      out.push(j);
+    }
+    return out;
+  }, [inbox]);
+
+  const shortlistedInbox = useMemo(() => {
+    const seen = new Set<string>();
+    const out: InboxJob[] = [];
+    for (const j of inbox) {
+      if (j.done || seen.has(j.url)) continue;
+      if (j.pipelineState !== "shortlisted") continue;
       seen.add(j.url);
       out.push(j);
     }
@@ -92,7 +107,7 @@ export function PipelineView({
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
     let rows = applications;
-    if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
+    if (tab !== "APPLICATIONS") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
     if (minFilter != null) {
       rows = rows.filter((r) => {
         const n = scoreNum(r.score);
@@ -145,7 +160,9 @@ export function PipelineView({
           const count =
             t === "INBOX"
               ? pendingInbox.length
-              : t === "ALL"
+              : t === "SHORTLIST"
+                ? shortlistedInbox.length
+              : t === "APPLICATIONS"
                 ? applications.length
                 : applications.filter((r) => canonStatus(r.status).includes(t)).length;
           return (
@@ -184,6 +201,12 @@ export function PipelineView({
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
         pendingInbox.length > 0 ? (
           <InboxTriage inbox={pendingInbox} />
+        ) : (
+          <InboxEmpty count={0} filtered={false} />
+        )
+      ) : tab === "SHORTLIST" ? (
+        shortlistedInbox.length > 0 ? (
+          <InboxTriage inbox={shortlistedInbox} mode="shortlist" />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )

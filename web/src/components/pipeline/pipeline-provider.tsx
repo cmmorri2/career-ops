@@ -45,8 +45,13 @@ export function PipelineProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const onFocus = () => refetch();
+    const onChanged = () => refetch();
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    window.addEventListener("co-pipeline-changed", onChanged);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("co-pipeline-changed", onChanged);
+    };
   }, [refetch]);
 
   return (

@@ -21,7 +21,7 @@ const BATCH = 20;
 // Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
 // it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
 // role relevant — order is freshness with a single documented plug point.
-export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
+export function InboxTriage({ inbox, mode = "inbox" }: { inbox: InboxJob[]; mode?: "inbox" | "shortlist" }) {
   const { jobs, startJob } = useJobs();
 
   // facets
@@ -133,13 +133,34 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const visible = capped ? ordered.slice(0, BATCH) : ordered;
   const hiddenCount = hidden.length;
 
-  const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
+  const isDbBacked = (job: InboxJob) => job.pipelineState != null || job.id != null;
+  const notifyChanged = () => window.dispatchEvent(new CustomEvent("co-pipeline-changed"));
+  const movePosting = async (job: InboxJob, state: "pending" | "shortlisted" | "discarded") => {
+    const res = await fetch("/api/postings/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: job.id, url: job.url, state }),
+    });
+    if (!res.ok) throw new Error("state update failed");
+    notifyChanged();
+  };
+
+  const isShortlisted = (url: string) => mode === "shortlist" || shortlist.some((s) => s.url === url);
 
   const save = (job: InboxJob) => {
+    if (isDbBacked(job)) {
+      void movePosting(job, "shortlisted").catch(() => {});
+      return;
+    }
     if (isShortlisted(job.url)) return;
     setShortlist((s) => [...s, { url: job.url, company: job.company, role: job.role }]);
   };
   const skip = (job: InboxJob) => {
+    if (isDbBacked(job)) {
+      void movePosting(job, "discarded").catch(() => {});
+      setUndo({ label: `Discarded ${job.company}`, fn: () => { void movePosting(job, mode === "shortlist" ? "shortlisted" : "pending").catch(() => {}); } });
+      return;
+    }
     setHidden((h) => (h.includes(job.url) ? h : [...h, job.url]));
     setUndo({ label: `Skipped ${job.company}`, fn: () => setHidden((h) => h.filter((u) => u !== job.url)) });
   };
@@ -158,21 +179,28 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     setSelected(new Set());
   };
 
+  const trayItems = useMemo(
+    () => mode === "shortlist"
+      ? visible.map((e) => ({ url: e.job.url, company: e.job.company, role: e.job.role }))
+      : shortlist,
+    [mode, visible, shortlist],
+  );
+
   const estimate = useMemo(() => {
     const samples = jobs.filter((j) => j.kind === "evaluate" && j.status === "done" && j.cost?.tokens).map((j) => j.cost!);
-    if (!samples.length || shortlist.length === 0) return {};
+    if (!samples.length || trayItems.length === 0) return {};
     const avgT = samples.reduce((a, c) => a + c.tokens, 0) / samples.length;
     const usds = samples.filter((s) => s.usd != null).map((s) => s.usd!);
     const avgUsd = usds.length ? usds.reduce((a, c) => a + c, 0) / usds.length : undefined;
-    return { tokens: Math.round(avgT * shortlist.length), usd: avgUsd != null ? +(avgUsd * shortlist.length).toFixed(2) : undefined };
-  }, [jobs, shortlist.length]);
+    return { tokens: Math.round(avgT * trayItems.length), usd: avgUsd != null ? +(avgUsd * trayItems.length).toFixed(2) : undefined };
+  }, [jobs, trayItems.length]);
 
   const scoreShortlist = () => {
     const batchId = `shortlist-${Date.now()}`;
-    for (const it of shortlist) {
+    for (const it of trayItems) {
       startJob({ title: `Score · ${it.company}`, subtitle: it.role, kind: "evaluate", input: it.url, page: "/pipeline", batchId });
     }
-    setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
+    if (mode === "inbox") setShortlist([]); // sent — the rows flip to Scoring… → badge via scoreByUrl
   };
 
   // The parent (PipelineView) renders the rich empty-inbox card; here we always
@@ -180,7 +208,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   if (inbox.length === 0) return null;
 
   return (
-    <div className={cn("mx-auto mt-4 max-w-3xl", shortlist.length > 0 && "pb-28 sm:pb-24")}>
+    <div className={cn("mx-auto mt-4 max-w-3xl", trayItems.length > 0 && "pb-28 sm:pb-24")}>
       <FacetChips
         within={within}
         setWithin={setWithin}
@@ -203,7 +231,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {/* batch header: fresh slice by default, or the full filtered set */}
       <div className="mt-4 flex items-baseline justify-between gap-3">
         <p className="text-sm font-medium text-foreground">
-          {capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
+          {mode === "shortlist" ? "Shortlisted — ready to score" : capped ? "Fresh — worth a look" : anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : "All roles"}
         </p>
         {hiddenCount > 0 && (
           <button type="button" onClick={() => setHidden([])} className="text-xs text-faint transition-colors hover:text-foreground">
@@ -261,13 +289,13 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       )}
 
       {/* empty-shortlist guidance (only once there's nothing saved) */}
-      {shortlist.length === 0 && (
+      {trayItems.length === 0 && (
         <p className="mt-4 text-center text-xs text-faint">Save roles worth a look, then score them together — one token spend.</p>
       )}
 
       {/* undo toast (sits above the tray) */}
       {undo && (
-        <div className={cn("fixed inset-x-0 z-40 flex justify-center px-4", shortlist.length > 0 ? "bottom-24 sm:bottom-24" : "bottom-6")}>
+        <div className={cn("fixed inset-x-0 z-40 flex justify-center px-4", trayItems.length > 0 ? "bottom-24 sm:bottom-24" : "bottom-6")}>
           <div className="inline-flex items-center gap-3 rounded-full border border-border bg-surface px-4 py-2 text-sm shadow-lg">
             <span className="text-muted">{undo.label}</span>
             <button type="button" onClick={() => { undo.fn(); setUndo(null); }} className="inline-flex items-center gap-1 font-medium text-brand max-sm:min-h-[44px]">
@@ -278,11 +306,24 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       )}
 
       <ShortlistTray
-        items={shortlist}
+        items={trayItems}
         estimate={estimate}
         hasCli={hasCli}
-        onRemove={(url) => setShortlist((s) => s.filter((x) => x.url !== url))}
-        onClear={() => setShortlist([])}
+        onRemove={(url) => {
+          if (mode === "shortlist") {
+            const item = inbox.find((j) => j.url === url);
+            if (item) void movePosting(item, "pending").catch(() => {});
+          } else {
+            setShortlist((s) => s.filter((x) => x.url !== url));
+          }
+        }}
+        onClear={() => {
+          if (mode === "shortlist") {
+            for (const item of inbox) void movePosting(item, "pending").catch(() => {});
+          } else {
+            setShortlist([]);
+          }
+        }}
         onScore={scoreShortlist}
       />
     </div>
