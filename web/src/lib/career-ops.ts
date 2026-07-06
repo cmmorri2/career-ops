@@ -93,9 +93,9 @@ function readSqliteInbox(): InboxJob[] | null {
       SELECT id, url, company_name, title, location, compensation, first_seen,
              pipeline_state, status, score, notes, source, report_path, pdf_path
       FROM job_postings
-      WHERE pipeline_state IN ('pending', 'shortlisted')
+      WHERE pipeline_state IN ('pending', 'shortlisted', 'expired')
       ORDER BY
-        CASE pipeline_state WHEN 'shortlisted' THEN 0 ELSE 1 END,
+        CASE pipeline_state WHEN 'shortlisted' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
         COALESCE(first_seen, created_at) DESC,
         company_name COLLATE NOCASE,
         title COLLATE NOCASE

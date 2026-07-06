@@ -24,6 +24,7 @@ const TABS = [
   "REJECTED",
   "DISCARDED",
   "SKIP",
+  "EXPIRED",
 ] as const;
 type Tab = (typeof TABS)[number];
 
@@ -104,6 +105,18 @@ export function PipelineView({
     return out;
   }, [inbox]);
 
+  const expiredInbox = useMemo(() => {
+    const seen = new Set<string>();
+    const out: InboxJob[] = [];
+    for (const j of inbox) {
+      if (j.done || seen.has(j.url)) continue;
+      if (j.pipelineState !== "expired") continue;
+      seen.add(j.url);
+      out.push(j);
+    }
+    return out;
+  }, [inbox]);
+
   const filtered = useMemo(() => {
     if (tab === "INBOX") return [];
     let rows = applications;
@@ -162,6 +175,8 @@ export function PipelineView({
               ? pendingInbox.length
               : t === "SHORTLIST"
                 ? shortlistedInbox.length
+              : t === "EXPIRED"
+                ? expiredInbox.length
               : t === "APPLICATIONS"
                 ? applications.length
                 : applications.filter((r) => canonStatus(r.status).includes(t)).length;
@@ -207,6 +222,12 @@ export function PipelineView({
       ) : tab === "SHORTLIST" ? (
         shortlistedInbox.length > 0 ? (
           <InboxTriage inbox={shortlistedInbox} mode="shortlist" />
+        ) : (
+          <InboxEmpty count={0} filtered={false} />
+        )
+      ) : tab === "EXPIRED" ? (
+        expiredInbox.length > 0 ? (
+          <ExpiredPostingsTable postings={expiredInbox} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )
@@ -263,6 +284,62 @@ export function PipelineView({
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function ExpiredPostingsTable({ postings }: { postings: InboxJob[] }) {
+  const restore = async (posting: InboxJob) => {
+    const res = await fetch("/api/postings/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: posting.id, url: posting.url, state: "pending" }),
+    });
+    if (res.ok) window.dispatchEvent(new CustomEvent("co-pipeline-changed"));
+  };
+
+  return (
+    <div className="mt-4 overflow-hidden rounded-2xl border border-border">
+      <table className="w-full text-sm">
+        <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
+          <tr>
+            <th className="px-4 py-2.5 font-medium">company</th>
+            <th className="px-4 py-2.5 font-medium">role</th>
+            <th className="px-4 py-2.5 font-medium">source</th>
+            <th className="px-4 py-2.5 font-medium">first seen</th>
+            <th className="px-4 py-2.5 font-medium"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {postings.map((p) => (
+            <tr key={p.url} className="border-t border-border/70">
+              <td className="px-4 py-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <CompanyLogo name={p.company} />
+                  <span className="truncate font-medium text-foreground">{p.company}</span>
+                </div>
+              </td>
+              <td className="px-4 py-3">
+                <a href={p.url} target="_blank" rel="noreferrer" className="font-medium text-foreground hover:text-brand">
+                  {p.role}
+                </a>
+                {p.location && <p className="mt-0.5 text-xs text-faint">{p.location}</p>}
+              </td>
+              <td className="px-4 py-3 text-muted">{p.source || "scanner"}</td>
+              <td className="px-4 py-3 text-muted">{p.postedAt || "unknown"}</td>
+              <td className="px-4 py-3 text-right">
+                <button
+                  type="button"
+                  onClick={() => void restore(p)}
+                  className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand"
+                >
+                  Restore
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
