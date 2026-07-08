@@ -64,7 +64,7 @@ Options:
   --limit N            Max number of offers to process in this run
   --max-retries N      Max retry attempts per offer (default: 2)
   --min-score N        Skip PDF/tracker for offers scoring below N (default: 0 = off)
-  --skip-pdf           Skip PDF generation entirely (write ❌ in tracker PDF column)
+  --skip-pdf           Deprecated compatibility flag; ignored because applications always generate HTML/PDF
   --rate-limit-sleep N Seconds to wait before retrying a rate-limited worker
                        (default: 300)
   --model NAME         Claude model passed to `claude -p --model` (default:
@@ -426,11 +426,9 @@ process_offer() {
   # Build the prompt with placeholders replaced
   local prompt
   if [[ "$SKIP_PDF" == "true" ]]; then
-    prompt="Procesa esta oferta de empleo. Ejecuta el pipeline: evaluación A-F + report .md + tracker line. NO generes PDF; en el tracker escribe ❌ en la columna PDF y en el JSON final establece \"pdf\": null."
-    echo "    ⏭️  --skip-pdf set — skipping PDF generation for #$id ($url)"
-  else
-    prompt="Procesa esta oferta de empleo. Ejecuta el pipeline completo: evaluación A-F + report .md + PDF + tracker line."
+    echo "    ⚠️  --skip-pdf is deprecated and ignored; generating HTML/PDF for #$id ($url)"
   fi
+  prompt="Procesa esta oferta de empleo. Ejecuta el pipeline completo: evaluación A-F + report .md + HTML durable + PDF + tracker line. Escribe el HTML y el PDF en el mismo directorio bajo output/."
   prompt="$prompt URL: $url"
   prompt="$prompt JD file: $jd_file"
   prompt="$prompt Report number: $report_num"
@@ -929,4 +927,3 @@ main() {
 }
 
 main "$@"
-

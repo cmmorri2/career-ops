@@ -806,6 +806,35 @@ if (generatePdfScript.includes('opts.reportNum') && generatePdfScript.includes('
 } else {
   fail('renderHtmlToPdf does not read manifest metadata from opts');
 }
+
+const pdfModeArtifacts = readFile('modes/pdf.md');
+const pipelineModeArtifacts = readFile('modes/pipeline.md');
+const autoPipelineModeArtifacts = readFile('modes/auto-pipeline.md');
+const batchPromptArtifacts = readFile('batch/batch-prompt.md');
+const batchRunnerArtifacts = readFile('batch/batch-runner.sh');
+const webRunRouteArtifacts = readFile('web/src/app/api/run/route.ts');
+if (
+  pdfModeArtifacts.includes('never `/tmp`') &&
+  pdfModeArtifacts.includes('same directory as the HTML source') &&
+  !/\/tmp\/cv-\{candidate\}-\{company\}\.html/.test(webRunRouteArtifacts) &&
+  webRunRouteArtifacts.includes('Never use /tmp for the source HTML')
+) {
+  pass('PDF generation keeps durable HTML beside generated PDF under output/');
+} else {
+  fail('PDF generation instructions allow temp HTML or split HTML/PDF directories');
+}
+if (
+  pipelineModeArtifacts.includes('Always generate both the source HTML and rendered PDF') &&
+  autoPipelineModeArtifacts.includes('Always produce both durable artifacts') &&
+  batchPromptArtifacts.includes('Always generate the tailored source HTML and rendered PDF') &&
+  batchRunnerArtifacts.includes('--skip-pdf is deprecated and ignored') &&
+  !pipelineModeArtifacts.includes('PDF (if score >=') &&
+  !batchPromptArtifacts.includes('If score < threshold')
+) {
+  pass('application generation always produces HTML/PDF artifacts');
+} else {
+  fail('application generation can still skip HTML/PDF artifacts');
+}
 try {
   const { repoRelativeManifestPath, injectPrintPageCss } = await import(pathToFileURL(join(ROOT, 'generate-pdf.mjs')).href);
   const insideHtmlPath = join(ROOT, 'templates', 'cv-template.html');

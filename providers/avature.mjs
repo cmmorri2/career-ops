@@ -92,7 +92,15 @@ function parseLocation(block) {
     block.match(/list-item-location[^>]*>([\s\S]*?)<\/span>/i) ||
     block.match(/class="[^"]*\blocation\b[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div|li)>/i) ||
     block.match(/glyphicon-map-marker[\s\S]{0,80}?>([^<]{2,60})</i);
-  return m ? clean(m[1]) : '';
+  if (m) return clean(m[1]);
+
+  // Branded Avature tenants such as Lenovo render location in the card
+  // subtitle as plain spans alongside Req # and Posted metadata.
+  const subtitle = block.match(/class="[^"]*\barticle__header__text__subtitle\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i)?.[1] || '';
+  const fields = [...subtitle.matchAll(/<span\b[^>]*>([\s\S]*?)<\/span>/gi)]
+    .map((match) => clean(match[1]))
+    .filter(Boolean);
+  return fields.find((field) => !/^Req #:/i.test(field) && !/^Posted /i.test(field)) || '';
 }
 
 /** @param {string} htmlText @param {string} origin */

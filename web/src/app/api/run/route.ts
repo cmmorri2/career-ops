@@ -28,12 +28,12 @@ Target: ${input}`;
     return `You are generating the user's ATS-optimized, TAILORED CV PDF for application #${input}, headless, on their machine. Run the REAL career-ops "pdf" mode — follow modes/pdf.md EXACTLY (do not improvise a format).
 1. Read modes/pdf.md, cv.md, config/profile.yml, and the evaluation report at reports/${input}-*.md (for the JD keywords + analysis).
 2. Tailor the CV per modes/pdf.md: inject the JD's keywords into the summary + first bullets, reorder experience by relevance, build the competency grid, pick the top 3–4 projects. NEVER invent skills — only reword REAL experience using the JD's vocabulary.
-3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content; write the HTML to /tmp/cv-{candidate}-{company}.html (candidate = the profile name in kebab-case).
-4. Render the PDF: \`node generate-pdf.mjs /tmp/cv-{candidate}-{company}.html output/cv-{candidate}-{company}-${today}.pdf --format={letter for US/Canada companies, else a4}\`.
+3. Fill templates/cv-template.html's {{...}} placeholders with the tailored content. If this application has a package directory named in the tracker/report notes (for example \`output/{application-slug}/\`), write BOTH artifacts there; otherwise write BOTH artifacts directly under \`output/\`. Never use /tmp for the source HTML. Use \`output/{application-slug}/cv-{candidate}-{company}-${today}.html\` and \`output/{application-slug}/cv-{candidate}-{company}-${today}.pdf\` when a package directory exists, or \`output/cv-{candidate}-{company}-${today}.html\` and \`output/cv-{candidate}-{company}-${today}.pdf\` otherwise.
+4. Render the PDF from that durable HTML path: \`node generate-pdf.mjs {html-path} {pdf-path} --format={letter for US/Canada companies, else a4} --report=${input}\`.
 5. Update the tracker: in data/applications.md, change the PDF column for row #${input} from ❌ to ✅.
 Do not submit anything anywhere.
 
-End with EXACTLY one final line: VERDICT: {5 if the PDF was written, else 1}/5 — {the output/ path, ≤12 words}`;
+End with EXACTLY one final line: VERDICT: {5 if both HTML and PDF were written, else 1}/5 — {the output/ path, ≤12 words}`;
   }
   if (kind === "fix-portal") {
     return `A company's job-portal ATS slug is BROKEN — career-ops can no longer scan it, so it silently disappears from every future scan. Repair it (headless, on the user's machine):
@@ -52,9 +52,10 @@ End with EXACTLY one final line: VERDICT: {5 if now live, else 1}/5 — {what yo
 2. Persist the result CANONICALLY so the web and the CLI share ONE source of truth:
    a. Reserve a report number: run \`node reserve-report-num.mjs\` — its stdout is a 3-digit number (e.g. 035).
    b. Write the full report to reports/{num}-{company-slug}-${today}.md  (company-slug = company lowercased, non-alphanumerics → hyphens).
-   c. Append ONE row of 9 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score):
-      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t❌\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note}
-   d. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
+   c. Always generate the tailored CV artifacts for this evaluation: write source HTML to \`output/cv-{candidate}-{company-slug}-${today}.html\`, render \`output/cv-{candidate}-{company-slug}-${today}.pdf\`, and pass \`--report={num}\` to \`node generate-pdf.mjs\`. Do not skip HTML/PDF based on score.
+   d. Append ONE row of 9 TAB-separated columns to batch/tracker-additions/{num}-{company-slug}.tsv, in THIS exact order (real \\t tabs, status BEFORE score):
+      {num}\t${today}\t{Company}\t{Role}\t{CanonicalStatus e.g. Evaluated}\t{score}/5\t✅\t[{num}](reports/{num}-{company-slug}-${today}.md)\t{one-line note with PDF path}
+   e. Merge into the tracker: run \`node merge-tracker.mjs\` (it dedupes by company+role+report-num, validates the status, and writes data/applications.md — NEVER edit applications.md by hand).
 
 3. NEVER submit an application, fill no forms, contact no one. This is evaluation + persistence ONLY.${mem}
 
