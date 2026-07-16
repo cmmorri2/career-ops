@@ -7,6 +7,10 @@ data/*.sqlite
 data/*.sqlite-shm
 data/*.sqlite-wal
 data/follow-ups.md
+data/linkedin-inbox.md
+data/linkedin-leads.jsonl
+data/linkedin-email-processed.jsonl
+data/linkedin-qa.md
 data/pipeline.md
 data/scan-history.tsv
 data/pdf-index.tsv
@@ -16,6 +20,9 @@ data/parser-output/**/*.json
 !data/parser-output/.gitkeep
 !data/parser-output/**/.gitkeep
 data/cache/ats-companies/
+data/cache/linkedin-email-raw/
+__pycache__/
+*.pyc
 reports/*
 !reports/.gitkeep
 output/*
