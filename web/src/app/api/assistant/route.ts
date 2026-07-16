@@ -17,8 +17,8 @@ YOU CAN ACT — you do it by emitting ACTION ENVELOPES inside your reply. An env
 The args are a single JSON object. The dashboard parses the envelope and performs the action (you won't see its output) — so just say briefly what you're doing, then emit the envelope.
 
 ACTIONS:
-- navigate {"path":"/pipeline?tab=OFFER&min=4"} — take the user to a section. Valid paths: /, /pipeline, /portals, /analytics, /cv, /config, /apply, /pipeline/{n} (a report), /jobs/{id} (a worker). The path may carry a query string.
-- filterPipeline {"tab":"OFFER","min":4,"q":"text","sort":"score","dir":-1} — filter the pipeline table in place. tab ∈ INBOX, ALL, EVALUATED, APPLIED, RESPONDED, INTERVIEW, OFFER, REJECTED, DISCARDED, SKIP; min = score floor 0–5.
+- navigate {"path":"/pipeline?tab=OFFER&min=4"} — take the user to a section. Valid paths: /, /pipeline, /portals, /analytics, /cv, /config, /apply, /pipeline/{n} (a report), /postings/{id} (a posting), /jobs/{id} (a worker). The path may carry a query string.
+- filterPipeline {"tab":"INBOX","min":4,"pay":180000,"mode":"Hybrid","q":"text","sort":"pay","dir":-1} — filter the pipeline table in place. tab ∈ INBOX, SHORTLIST, APPLICATIONS, ALL, EVALUATED, APPLIED, RESPONDED, INTERVIEW, OFFER, REJECTED, DISCARDED, SKIP, EXPIRED; min = score floor 0–5; pay = minimum pay ceiling; mode ∈ Remote, RemoteFlex, Hybrid, Full; sort ∈ company, role, score, status, date, location, pay, last.
 - evaluate {"url":"https://…","title":"Evaluate · Acme","subtitle":"Role"} — spin ONE read-only evaluation worker on a SPECIFIC posting URL. Only when you actually have a real URL (e.g. from the page the user is on).
 - evaluateCompany {"company":"Anthropic"} — evaluate ALL of the user's PENDING inbox postings for that company. Emit the COMPANY NAME ONLY — never URLs; the app resolves the concrete postings itself. Big batches ask the user to confirm first.
 - research {"target":"https://… or 'my portfolio'","title":"Research · X"} — spin a read-only research worker.

@@ -5,6 +5,33 @@ import { companyDomain, companyInitials, monogramHue } from "@/lib/company";
 import { cn } from "@/lib/cn";
 
 const CONFIG_KEY = "career-ops:config";
+const LOGO_CACHE_KEY = "career-ops:logo-cache:v1";
+const LOGO_CACHE_TTL = 180 * 24 * 60 * 60 * 1000;
+
+type LogoCacheEntry = { ok: boolean; ts: number };
+
+function readLogoCache(domain: string): LogoCacheEntry | null {
+  try {
+    const raw = localStorage.getItem(LOGO_CACHE_KEY);
+    const cache = raw ? JSON.parse(raw) : null;
+    const entry = cache?.[domain] as LogoCacheEntry | undefined;
+    if (!entry || Date.now() - entry.ts > LOGO_CACHE_TTL) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+function writeLogoCache(domain: string, ok: boolean) {
+  try {
+    const raw = localStorage.getItem(LOGO_CACHE_KEY);
+    const cache = raw ? JSON.parse(raw) : {};
+    cache[domain] = { ok, ts: Date.now() };
+    localStorage.setItem(LOGO_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
 
 // A small company mark: the real favicon on a white tile when logos are enabled
 // and resolvable, otherwise a deterministic colored monogram. The monogram is
@@ -23,6 +50,7 @@ export function CompanyLogo({
   const [enabled, setEnabled] = useState(false); // monogram-only until config known
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [knownOk, setKnownOk] = useState(false);
 
   useEffect(() => {
     try {
@@ -35,6 +63,17 @@ export function CompanyLogo({
   }, []);
 
   const domain = companyDomain(name);
+  useEffect(() => {
+    setFailed(false);
+    setLoaded(false);
+    setKnownOk(false);
+    if (!domain) return;
+    const cached = readLogoCache(domain);
+    if (!cached) return;
+    if (cached.ok) setKnownOk(true);
+    else setFailed(true);
+  }, [domain]);
+
   const hue = monogramHue(name);
   const radius = Math.max(4, Math.round(size * 0.28));
   const showImg = enabled && !!domain && !failed;
@@ -64,10 +103,16 @@ export function CompanyLogo({
           height={size}
           loading="lazy"
           referrerPolicy="no-referrer"
-          onLoad={() => setLoaded(true)}
-          onError={() => setFailed(true)}
+          onLoad={() => {
+            setLoaded(true);
+            if (domain) writeLogoCache(domain, true);
+          }}
+          onError={() => {
+            setFailed(true);
+            if (domain) writeLogoCache(domain, false);
+          }}
           className="absolute inset-0 h-full w-full bg-white object-contain transition-opacity duration-200"
-          style={{ opacity: loaded ? 1 : 0, padding: Math.max(1, Math.round(size * 0.1)) }}
+          style={{ opacity: loaded || knownOk ? 1 : 0, padding: Math.max(1, Math.round(size * 0.1)) }}
         />
       )}
     </span>

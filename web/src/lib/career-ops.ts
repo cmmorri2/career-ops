@@ -185,7 +185,379 @@ export type Application = {
   pdf: string;
   report: string;
   notes: string;
+  location?: string;
+  locationRegion?: string;
+  workMode?: "Remote" | "RemoteFlex" | "Hybrid" | "Full" | string;
+  payRange?: string;
+  payMax?: number;
+  paySource?: "POSTED" | "est" | string;
+  lastContact?: string;
 };
+
+export type PipelinePosting = {
+  id: number;
+  url: string;
+  company: string;
+  role: string;
+  location?: string;
+  locationRegion?: string;
+  compensation?: string;
+  date: string;
+  lastSeen?: string;
+  status: string;
+  pipelineState: "pending" | "shortlisted" | "processed" | "discarded" | "expired" | string;
+  score: string;
+  notes: string;
+  source?: string;
+  reportPath?: string;
+  pdfPath?: string;
+  deepFitScore?: number;
+  deepStretchScore?: number;
+  deepInterestScore?: number;
+  applicationPriority?: string;
+  deepReviewPath?: string;
+  deepReviewedAt?: string;
+  workMode?: "Remote" | "RemoteFlex" | "Hybrid" | "Full" | string;
+  payRange?: string;
+  payMax?: number;
+  paySource?: "POSTED" | "est" | string;
+  lastContact?: string;
+};
+
+export type PostingSnapshot = {
+  id: number;
+  postingId: number;
+  capturedAt: string;
+  title?: string;
+  location?: string;
+  description?: string;
+  rawSource?: string;
+};
+
+export type PostingArtifact = {
+  id: number;
+  applicationId?: number;
+  postingId?: number;
+  artifactType: string;
+  path: string;
+  createdAt: string;
+};
+
+const moneySpanRe = /~?(?:[$€£]|CHF ?|EUR ?|USD ?|GBP ?)\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:[$€£])?\d[\d,]*(?:\.\d+)?[KkMm]?)?/g;
+const moneyPartRe = /(\d[\d,]*(?:\.\d+)?)\s*([KkMm]?)/g;
+const isoDateRe = /\b20\d{2}-\d{2}-\d{2}\b/g;
+const cityStateRe = /\b([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+){0,2}),? (A[KLRZ]|C[AOT]|D[CE]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\b/;
+const cityIntlRe = /\b(Porto|Lisbon|London|Berlin|Munich|Hamburg|Frankfurt|Cologne|D(?:ü|u)sseldorf|Stuttgart|Z(?:ü|u)rich|Geneva|Lausanne|Basel|Dublin|Cork|Amsterdam|Rotterdam|Eindhoven|Utrecht|Paris|Lyon|Madrid|Barcelona|Valencia|Stockholm|Gothenburg|Malm(?:ö|o)|Copenhagen|Oslo|Helsinki|Milan|Rome|Turin|Vienna|Brussels|Ghent|Antwerp|Luxembourg|Warsaw|Krak(?:ó|o)w|Wroc(?:ł|l)aw|Tallinn|Riga|Vilnius|Prague|Brno|Budapest|Bucharest|Sofia|Athens|Bengaluru|Bangalore|Singapore|Sydney|Toronto|Vancouver|Tel Aviv|S(?:ã|a)o Paulo)\b/i;
+const estHintRe = /\(est[),;. ]|\best\)|\bmarket\b/i;
+
+const stateNameToCode: Record<string, string> = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO", connecticut: "CT", delaware: "DE",
+  florida: "FL", georgia: "GA", hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY",
+  louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN", mississippi: "MS", missouri: "MO",
+  montana: "MT", nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+  "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK", oregon: "OR", pennsylvania: "PA", "rhode island": "RI",
+  "south carolina": "SC", "south dakota": "SD", tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT", virginia: "VA", washington: "WA",
+  "west virginia": "WV", wisconsin: "WI", wyoming: "WY", "district of columbia": "DC",
+};
+
+const cityToCountry: Record<string, string> = {
+  porto: "Portugal", lisbon: "Portugal", london: "UK", berlin: "Germany", munich: "Germany", hamburg: "Germany", frankfurt: "Germany",
+  cologne: "Germany", dusseldorf: "Germany", düsseldorf: "Germany", stuttgart: "Germany", zurich: "Switzerland", zürich: "Switzerland",
+  geneva: "Switzerland", lausanne: "Switzerland", basel: "Switzerland", dublin: "Ireland", cork: "Ireland", amsterdam: "Netherlands",
+  rotterdam: "Netherlands", eindhoven: "Netherlands", utrecht: "Netherlands", paris: "France", lyon: "France", madrid: "Spain",
+  barcelona: "Spain", valencia: "Spain", stockholm: "Sweden", gothenburg: "Sweden", malmo: "Sweden", malmö: "Sweden",
+  copenhagen: "Denmark", oslo: "Norway", helsinki: "Finland", milan: "Italy", rome: "Italy", turin: "Italy", vienna: "Austria",
+  brussels: "Belgium", ghent: "Belgium", antwerp: "Belgium", luxembourg: "Luxembourg", warsaw: "Poland", krakow: "Poland",
+  kraków: "Poland", wroclaw: "Poland", wrocław: "Poland", tallinn: "Estonia", riga: "Latvia", vilnius: "Lithuania",
+  prague: "Czech Republic", brno: "Czech Republic", budapest: "Hungary", bucharest: "Romania", sofia: "Bulgaria", athens: "Greece",
+  bengaluru: "India", bangalore: "India", singapore: "Singapore", sydney: "Australia", toronto: "Canada", vancouver: "Canada",
+  "tel aviv": "Israel", "sao paulo": "Brazil", "são paulo": "Brazil",
+};
+
+const countryAliases: [RegExp, string][] = [
+  [/\b(united states|usa|u\.s\.|u\.s\.a\.|remote\s*[- ]\s*us|remote us|us remote|us only)\b/i, "US"],
+  [/\b(canada|canadian)\b/i, "Canada"],
+  [/\b(australia|australian)\b/i, "Australia"],
+  [/\b(united kingdom|uk|england|scotland|wales|britain)\b/i, "UK"],
+  [/\b(germany|deutschland)\b/i, "Germany"],
+  [/\b(france|french)\b/i, "France"],
+  [/\b(spain|spanish)\b/i, "Spain"],
+  [/\b(portugal|portuguese)\b/i, "Portugal"],
+  [/\b(ireland|irish)\b/i, "Ireland"],
+  [/\b(netherlands|holland|dutch)\b/i, "Netherlands"],
+  [/\b(sweden|swedish)\b/i, "Sweden"],
+  [/\b(denmark|danish)\b/i, "Denmark"],
+  [/\b(norway|norwegian)\b/i, "Norway"],
+  [/\b(finland|finnish)\b/i, "Finland"],
+  [/\b(italy|italian)\b/i, "Italy"],
+  [/\b(switzerland|swiss|chf)\b/i, "Switzerland"],
+  [/\b(belgium|belgian)\b/i, "Belgium"],
+  [/\b(india|indian)\b/i, "India"],
+  [/\b(singapore)\b/i, "Singapore"],
+  [/\b(japan|japanese)\b/i, "Japan"],
+  [/\b(brazil|brasil)\b/i, "Brazil"],
+  [/\b(mexico|mexican)\b/i, "Mexico"],
+  [/\b(israel|israeli)\b/i, "Israel"],
+  [/\b(europe|emea|eu)\b/i, "Europe"],
+  [/\b(apac)\b/i, "APAC"],
+  [/\b(latam)\b/i, "LATAM"],
+];
+
+function payCeiling(span: string): number {
+  let top = 0;
+  for (const m of span.matchAll(moneyPartRe)) {
+    let value = parseFloat(m[1].replaceAll(",", ""));
+    if (!Number.isFinite(value)) continue;
+    const suffix = m[2].toLowerCase();
+    if (suffix === "k") value *= 1_000;
+    if (suffix === "m") value *= 1_000_000;
+    top = Math.max(top, value);
+  }
+  return top;
+}
+
+function normalizeLocationRegion(location: string | undefined, text: string): string | undefined {
+  const combined = `${location ?? ""} ${text}`.trim();
+  if (!combined) return undefined;
+  const cityState = combined.match(cityStateRe);
+  if (cityState) return cityState[2];
+
+  const lower = combined.toLowerCase();
+  for (const [stateName, code] of Object.entries(stateNameToCode)) {
+    if (new RegExp(`\\b${stateName.replaceAll(" ", "\\s+")}\\b`, "i").test(lower)) return code;
+  }
+  const stateCode = combined.match(/\b(A[KLRZ]|C[AOT]|D[CE]|FL|GA|HI|I[ADLN]|K[SY]|LA|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[AT]|W[AIVY])\b/);
+  if (stateCode) return stateCode[1];
+
+  for (const [pattern, country] of countryAliases) {
+    if (pattern.test(combined)) return country;
+  }
+  const intl = combined.match(cityIntlRe)?.[0]?.toLowerCase();
+  if (intl) return cityToCountry[intl.replace("ü", "u").replace("ö", "o").replace("ł", "l").replace("ó", "o")] ?? cityToCountry[intl];
+  return undefined;
+}
+
+function deriveApplicationFields(app: Application): Application {
+  const lower = `${app.role} ${app.notes}`.toLowerCase();
+  const notesCity = app.notes.match(cityStateRe);
+  const roleCity = app.role.match(cityStateRe);
+  const intl = app.notes.match(cityIntlRe) ?? app.role.match(cityIntlRe);
+  const location = notesCity ? `${notesCity[1]}, ${notesCity[2]}` : roleCity ? `${roleCity[1]}, ${roleCity[2]}` : intl?.[0];
+
+  let workMode = "";
+  if (lower.includes("hybrid")) workMode = "Hybrid";
+  else if (lower.includes("remote") && (lower.includes("flex") || lower.includes("remote-first") || lower.includes("remote first"))) workMode = "RemoteFlex";
+  else if (lower.includes("remote")) workMode = "Remote";
+  else if (lower.includes("onsite") || lower.includes("on-site") || lower.includes("in-office")) workMode = "Full";
+  else if (location) workMode = "Full";
+
+  const moneyMatches = [...app.notes.matchAll(moneySpanRe)].map((m) => m[0]);
+  const payRange = moneyMatches.find((m) => /[-–]/.test(m)) ?? moneyMatches[0];
+  const payMax = payRange ? payCeiling(payRange) : 0;
+  let paySource = "";
+  if (payRange) {
+    if (lower.includes("(posted")) paySource = "POSTED";
+    else if (estHintRe.test(lower)) paySource = "est";
+  }
+
+  let lastContact = app.date;
+  for (const m of app.notes.matchAll(isoDateRe)) {
+    if (m[0] > lastContact) lastContact = m[0];
+  }
+
+  return {
+    ...app,
+    location: location || undefined,
+    locationRegion: normalizeLocationRegion(location, `${app.role} ${app.notes}`),
+    workMode: workMode || undefined,
+    payRange: payRange || undefined,
+    payMax: payMax || undefined,
+    paySource: paySource || undefined,
+    lastContact: lastContact || undefined,
+  };
+}
+
+function derivePostingFields(posting: PipelinePosting): PipelinePosting {
+  const text = `${posting.role} ${posting.location ?? ""} ${posting.compensation ?? ""} ${posting.notes}`.trim();
+  const lower = text.toLowerCase();
+  const noteCity = (posting.notes || posting.compensation || "").match(cityStateRe);
+  const roleCity = posting.role.match(cityStateRe);
+  const rawLocation = posting.location?.trim();
+  const intl = text.match(cityIntlRe);
+  const location = rawLocation || (noteCity ? `${noteCity[1]}, ${noteCity[2]}` : roleCity ? `${roleCity[1]}, ${roleCity[2]}` : intl?.[0]);
+
+  let workMode = "";
+  if (lower.includes("hybrid")) workMode = "Hybrid";
+  else if (lower.includes("remote") && (lower.includes("flex") || lower.includes("remote-first") || lower.includes("remote first"))) workMode = "RemoteFlex";
+  else if (lower.includes("remote")) workMode = "Remote";
+  else if (lower.includes("onsite") || lower.includes("on-site") || lower.includes("in-office")) workMode = "Full";
+  else if (location) workMode = "Full";
+
+  const moneyMatches = [...text.matchAll(moneySpanRe)].map((m) => m[0]);
+  const payRange = moneyMatches.find((m) => /[-–]/.test(m)) ?? moneyMatches[0];
+  const payMax = payRange ? payCeiling(payRange) : 0;
+  let paySource = "";
+  if (payRange) {
+    if (lower.includes("(posted")) paySource = "POSTED";
+    else if (estHintRe.test(lower) || lower.includes("note:")) paySource = "est";
+  }
+
+  let lastContact = posting.date;
+  for (const m of text.matchAll(isoDateRe)) {
+    if (m[0] > lastContact) lastContact = m[0];
+  }
+
+  return {
+    ...posting,
+    location: location || undefined,
+    locationRegion: normalizeLocationRegion(location, text),
+    workMode: workMode || undefined,
+    payRange: payRange || undefined,
+    payMax: payMax || undefined,
+    paySource: paySource || undefined,
+    lastContact: lastContact || undefined,
+  };
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+export function readPostings(): PipelinePosting[] {
+  if (!hasPostingDb()) return [];
+  try {
+    const rows = sqliteJson(`
+      SELECT id, url, company_name, title, location, compensation, first_seen, last_seen,
+             status, pipeline_state, score, notes, source, report_path, pdf_path,
+             deep_fit_score, deep_stretch_score, deep_interest_score,
+             application_priority, deep_review_path, deep_reviewed_at, created_at
+      FROM job_postings
+      ORDER BY
+        COALESCE(first_seen, created_at) DESC,
+        company_name COLLATE NOCASE,
+        title COLLATE NOCASE
+    `);
+    return rows.map((r) => derivePostingFields({
+      id: Number(r.id),
+      url: String(r.url ?? ""),
+      company: String(r.company_name ?? ""),
+      role: String(r.title ?? ""),
+      location: typeof r.location === "string" && r.location ? r.location : undefined,
+      compensation: typeof r.compensation === "string" && r.compensation ? r.compensation : undefined,
+      date: String(r.first_seen ?? r.created_at ?? ""),
+      lastSeen: typeof r.last_seen === "string" && r.last_seen ? r.last_seen : undefined,
+      status: String(r.status ?? ""),
+      pipelineState: typeof r.pipeline_state === "string" ? r.pipeline_state : "pending",
+      score: String(r.score ?? ""),
+      notes: String(r.notes ?? ""),
+      source: typeof r.source === "string" && r.source ? r.source : undefined,
+      reportPath: typeof r.report_path === "string" && r.report_path ? r.report_path : undefined,
+      pdfPath: typeof r.pdf_path === "string" && r.pdf_path ? r.pdf_path : undefined,
+      deepFitScore: optionalNumber(r.deep_fit_score),
+      deepStretchScore: optionalNumber(r.deep_stretch_score),
+      deepInterestScore: optionalNumber(r.deep_interest_score),
+      applicationPriority: typeof r.application_priority === "string" && r.application_priority ? r.application_priority : undefined,
+      deepReviewPath: typeof r.deep_review_path === "string" && r.deep_review_path ? r.deep_review_path : undefined,
+      deepReviewedAt: typeof r.deep_reviewed_at === "string" && r.deep_reviewed_at ? r.deep_reviewed_at : undefined,
+    })).filter((p) => p.id && p.url && p.company && p.role);
+  } catch {
+    return [];
+  }
+}
+
+export function findPosting(id: string | number): PipelinePosting | null {
+  const n = Number(id);
+  if (!Number.isFinite(n) || n <= 0 || !hasPostingDb()) return null;
+  try {
+    const rows = sqliteJson(`
+      SELECT id, url, company_name, title, location, compensation, first_seen, last_seen,
+             status, pipeline_state, score, notes, source, report_path, pdf_path,
+             deep_fit_score, deep_stretch_score, deep_interest_score,
+             application_priority, deep_review_path, deep_reviewed_at, created_at
+      FROM job_postings
+      WHERE id = ${Math.trunc(n)}
+      LIMIT 1
+    `);
+    const r = rows[0];
+    if (!r) return null;
+    return derivePostingFields({
+      id: Number(r.id),
+      url: String(r.url ?? ""),
+      company: String(r.company_name ?? ""),
+      role: String(r.title ?? ""),
+      location: typeof r.location === "string" && r.location ? r.location : undefined,
+      compensation: typeof r.compensation === "string" && r.compensation ? r.compensation : undefined,
+      date: String(r.first_seen ?? r.created_at ?? ""),
+      lastSeen: typeof r.last_seen === "string" && r.last_seen ? r.last_seen : undefined,
+      status: String(r.status ?? ""),
+      pipelineState: typeof r.pipeline_state === "string" ? r.pipeline_state : "pending",
+      score: String(r.score ?? ""),
+      notes: String(r.notes ?? ""),
+      source: typeof r.source === "string" && r.source ? r.source : undefined,
+      reportPath: typeof r.report_path === "string" && r.report_path ? r.report_path : undefined,
+      pdfPath: typeof r.pdf_path === "string" && r.pdf_path ? r.pdf_path : undefined,
+      deepFitScore: optionalNumber(r.deep_fit_score),
+      deepStretchScore: optionalNumber(r.deep_stretch_score),
+      deepInterestScore: optionalNumber(r.deep_interest_score),
+      applicationPriority: typeof r.application_priority === "string" && r.application_priority ? r.application_priority : undefined,
+      deepReviewPath: typeof r.deep_review_path === "string" && r.deep_review_path ? r.deep_review_path : undefined,
+      deepReviewedAt: typeof r.deep_reviewed_at === "string" && r.deep_reviewed_at ? r.deep_reviewed_at : undefined,
+    });
+  } catch {
+    return null;
+  }
+}
+
+export function readPostingSnapshot(postingId: string | number): PostingSnapshot | null {
+  const n = Number(postingId);
+  if (!Number.isFinite(n) || n <= 0 || !hasPostingDb()) return null;
+  try {
+    const rows = sqliteJson(`
+      SELECT id, posting_id, captured_at, title, location, description, raw_source
+      FROM posting_snapshots
+      WHERE posting_id = ${Math.trunc(n)}
+      ORDER BY captured_at DESC
+      LIMIT 1
+    `);
+    const r = rows[0];
+    if (!r) return null;
+    return {
+      id: Number(r.id),
+      postingId: Number(r.posting_id),
+      capturedAt: String(r.captured_at ?? ""),
+      title: typeof r.title === "string" && r.title ? r.title : undefined,
+      location: typeof r.location === "string" && r.location ? r.location : undefined,
+      description: typeof r.description === "string" && r.description ? r.description : undefined,
+      rawSource: typeof r.raw_source === "string" && r.raw_source ? r.raw_source : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function readPostingArtifacts(postingId: string | number): PostingArtifact[] {
+  const n = Number(postingId);
+  if (!Number.isFinite(n) || n <= 0 || !hasPostingDb()) return [];
+  try {
+    const rows = sqliteJson(`
+      SELECT id, application_id, posting_id, artifact_type, path, created_at
+      FROM artifacts
+      WHERE posting_id = ${Math.trunc(n)}
+      ORDER BY created_at DESC, id DESC
+    `);
+    return rows.map((r) => ({
+      id: Number(r.id),
+      applicationId: optionalNumber(r.application_id),
+      postingId: optionalNumber(r.posting_id),
+      artifactType: String(r.artifact_type ?? ""),
+      path: String(r.path ?? ""),
+      createdAt: String(r.created_at ?? ""),
+    })).filter((a) => a.id && a.artifactType && a.path);
+  } catch {
+    return [];
+  }
+}
 
 function readSqliteApplications(): Application[] | null {
   if (!hasPostingDb()) return null;
@@ -196,7 +568,7 @@ function readSqliteApplications(): Application[] | null {
       ORDER BY tracker_num
     `);
     if (rows.length === 0) return null;
-    return rows.map((r) => ({
+    return rows.map((r) => deriveApplicationFields({
       n: String(r.tracker_num ?? ""),
       date: String(r.date ?? ""),
       company: String(r.company ?? ""),
@@ -232,7 +604,7 @@ export function readApplications(): Application[] {
     if (cells.length < 8) continue;
     if (cells[0] === "#" || /^:?-{2,}:?$/.test(cells[0])) continue; // header / separator
     const [n, date, company, role, score, status, pdf, report, ...rest] = cells;
-    rows.push({ n, date, company, role, score, status, pdf, report, notes: rest.join(" | ") });
+    rows.push(deriveApplicationFields({ n, date, company, role, score, status, pdf, report, notes: rest.join(" | ") }));
   }
   return rows;
 }
@@ -289,6 +661,7 @@ export type PipelineSummary = {
   rootExists: boolean;
   inbox: InboxJob[];
   applications: Application[];
+  postings: PipelinePosting[];
 };
 
 export function pipelineSummary(): PipelineSummary {
@@ -301,6 +674,7 @@ export function pipelineSummary(): PipelineSummary {
     // triage view orders/faceted-filters on it entirely client-side.
     inbox: readInbox().map((j) => ({ ...j, postedAt: scanDates.get(j.url) })),
     applications: readApplications(),
+    postings: readPostings(),
   };
 }
 

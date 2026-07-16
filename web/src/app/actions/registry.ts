@@ -18,9 +18,9 @@ export const BATCH_CAP = 12; // hard ceiling on a single fan-out
 const CANON_STATUS = ["Evaluated", "Applied", "Responded", "Interview", "Offer", "Rejected", "Discarded", "SKIP"];
 
 const TAB_VALUES = [
-  "INBOX", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "REJECTED", "DISCARDED", "SKIP",
+  "INBOX", "SHORTLIST", "APPLICATIONS", "ALL", "EVALUATED", "APPLIED", "RESPONDED", "INTERVIEW", "OFFER", "REJECTED", "DISCARDED", "SKIP", "EXPIRED",
 ] as const;
-const SORT_VALUES = ["company", "role", "score", "status", "date"] as const;
+const SORT_VALUES = ["company", "role", "score", "status", "date", "location", "pay", "last"] as const;
 
 export type StartJobInput = {
   title: string;
@@ -93,7 +93,7 @@ function isAllowedPath(p: string): boolean {
   if (/^(https?:)?\/\//i.test(p)) return false;
   const path = p.split(/[?#]/)[0];
   if (path === "/") return true;
-  return /^\/(explore|pipeline|portals|analytics|cv|config|apply|jobs)(\/[^/]+)?$/.test(path);
+  return /^\/(explore|pipeline|postings|portals|analytics|cv|config|apply|jobs)(\/[^/]+)?$/.test(path);
 }
 
 function genBatchId(): string {
@@ -126,6 +126,10 @@ const ACTIONS: Record<string, ActionDef> = {
       if ((TAB_VALUES as readonly string[]).includes(tab)) sp.set("tab", tab);
       const min = typeof raw.min === "number" ? raw.min : parseFloat(String(raw.min ?? ""));
       if (Number.isFinite(min) && min >= 0 && min <= 5) sp.set("min", String(min));
+      const pay = typeof raw.pay === "number" ? raw.pay : parseFloat(String(raw.pay ?? ""));
+      if (Number.isFinite(pay) && pay >= 0) sp.set("pay", String(pay));
+      const mode = typeof raw.mode === "string" ? raw.mode : "";
+      if (["Remote", "RemoteFlex", "Hybrid", "Full"].includes(mode)) sp.set("mode", mode);
       if (isStr(raw.q)) sp.set("q", String(raw.q).slice(0, 80));
       const sort = typeof raw.sort === "string" ? raw.sort : "";
       if ((SORT_VALUES as readonly string[]).includes(sort)) sp.set("sort", sort);

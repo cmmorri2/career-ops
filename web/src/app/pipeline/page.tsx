@@ -5,10 +5,10 @@ import { PipelineView } from "@/components/pipeline-view";
 export const dynamic = "force-dynamic"; // always read fresh local files
 
 export default function PipelinePage() {
-  const { inbox, applications } = pipelineSummary();
+  const { inbox, applications, postings } = pipelineSummary();
   return (
     <Suspense>
-      <PipelineView applications={applications} inbox={inbox} />
+      <PipelineView applications={applications} inbox={inbox} postings={postings} />
     </Suspense>
   );
 }

@@ -16,6 +16,8 @@ export const dynamic = "force-dynamic";
 // every other card (this search or any future one), forever.
 
 const DOMAIN_RE = /^[a-z0-9.-]{1,253}\.[a-z]{2,}$/i;
+const LOGO_CACHE_MAX_AGE_SECONDS = 180 * 24 * 60 * 60;
+const LOGO_CACHE_CONTROL = `public, max-age=${LOGO_CACHE_MAX_AGE_SECONDS}, immutable`;
 
 function cacheDir(): string {
   return path.join(careerOpsRoot(), ".career-ops-web", "logo-cache");
@@ -82,9 +84,9 @@ export async function GET(req: NextRequest) {
   try {
     const buf = await fs.readFile(file);
     if (buf.byteLength > 0) {
-      return new Response(new Uint8Array(buf), { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" } });
+      return new Response(new Uint8Array(buf), { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": LOGO_CACHE_CONTROL } });
     }
-    return new Response("no logo", { status: 404 });
+    return new Response("no logo", { status: 404, headers: { "Cache-Control": LOGO_CACHE_CONTROL } });
   } catch {
     /* not cached yet → resolve below */
   }
@@ -103,6 +105,6 @@ export async function GET(req: NextRequest) {
     /* best-effort */
   }
 
-  if (!bytes) return new Response("no logo", { status: 404 });
-  return new Response(bytes, { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" } });
+  if (!bytes) return new Response("no logo", { status: 404, headers: { "Cache-Control": LOGO_CACHE_CONTROL } });
+  return new Response(bytes, { status: 200, headers: { "Content-Type": "image/png", "Cache-Control": LOGO_CACHE_CONTROL } });
 }
