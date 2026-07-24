@@ -29,6 +29,9 @@ output/*
 !output/.gitkeep
 batch/logs/*
 !batch/logs/.gitkeep
+logs/*
+!logs/.gitkeep
+data/cache/daily-sync/
 batch/batch-state.tsv
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Career Ops Sync"
+  short_description: "Refresh LinkedIn, scans, liveness, and exports"
+  default_prompt: "Use $career-ops-sync to refresh LinkedIn leads, scan portals, clean expired postings, and report the final pipeline counts."
