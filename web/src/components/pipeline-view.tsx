@@ -169,11 +169,16 @@ export function PipelineView({
     () => postings.filter((p) => p.pipelineState === "expired" || p.status === "expired"),
     [postings],
   );
+  const discardedPostings = useMemo(
+    () => postings.filter((p) => p.pipelineState === "discarded" && p.status !== "expired"),
+    [postings],
+  );
 
   const filteredPostings = useMemo(() => {
     let rows: PipelinePosting[];
     if (tab === "INBOX") rows = pendingPostings;
     else if (tab === "SHORTLIST") rows = shortlistedPostings;
+    else if (tab === "DISCARDED") rows = discardedPostings;
     else if (tab === "EXPIRED") rows = expiredPostings;
     else return [];
     if (minFilter != null) {
@@ -212,10 +217,10 @@ export function PipelineView({
       if (sort.key === "date") return (a.date || "").localeCompare(b.date || "") * sort.dir;
       return (a[sort.key] || "").localeCompare(b[sort.key] || "") * sort.dir;
     });
-  }, [pendingPostings, shortlistedPostings, expiredPostings, tab, q, sort, minFilter, payFilter, modeFilter]);
+  }, [pendingPostings, shortlistedPostings, discardedPostings, expiredPostings, tab, q, sort, minFilter, payFilter, modeFilter]);
 
   const filtered = useMemo(() => {
-    if (tab === "INBOX" || tab === "SHORTLIST" || tab === "EXPIRED") return [];
+    if (tab === "INBOX" || tab === "SHORTLIST" || tab === "DISCARDED" || tab === "EXPIRED") return [];
     let rows = applications;
     if (tab !== "APPLICATIONS") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
     if (minFilter != null) {
@@ -260,6 +265,7 @@ export function PipelineView({
           <p className="mt-1 text-sm text-muted">
             <span className="tabular-nums">{postings.length ? pendingPostings.length : pendingInbox.length}</span> in inbox ·{" "}
             <span className="tabular-nums">{postings.length ? shortlistedPostings.length : shortlistedInbox.length}</span> shortlisted ·{" "}
+            <span className="tabular-nums">{discardedPostings.length}</span> discarded ·{" "}
             <span className="tabular-nums">{applications.length}</span> tracked
           </p>
         </div>
@@ -284,6 +290,8 @@ export function PipelineView({
                 ? postings.length ? shortlistedPostings.length : shortlistedInbox.length
               : t === "EXPIRED"
                 ? postings.length ? expiredPostings.length : expiredInbox.length
+              : t === "DISCARDED"
+                ? discardedPostings.length
               : t === "APPLICATIONS"
                 ? applications.length
                 : applications.filter((r) => canonStatus(r.status).includes(t)).length;
@@ -403,6 +411,17 @@ export function PipelineView({
           )
         ) : shortlistedInbox.length > 0 ? (
           <LegacyInboxTable postings={shortlistedInbox} />
+        ) : (
+          <InboxEmpty count={0} filtered={false} />
+        )
+      ) : tab === "DISCARDED" ? (
+        filteredPostings.length > 0 ? (
+          <PostingsTable
+            postings={filteredPostings}
+            sort={sort}
+            onSort={(key) => setParams({ sort: key, dir: sort.key === key ? sort.dir * -1 : key === "location" ? 1 : -1 })}
+            onChanged={() => router.refresh()}
+          />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )
