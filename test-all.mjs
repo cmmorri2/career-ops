@@ -2472,6 +2472,10 @@ try {
     formatScanHistoryRow,
     formatPostingSnapshotRecord,
   } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const {
+    resolveWorkdayDetailApi,
+    workdayDescription,
+  } = await import(pathToFileURL(join(ROOT, 'backfill-posting-snapshots.mjs')).href);
 
   const filter = buildLocationFilter({
     always_allow: ['belgium', 'brussels'],
@@ -2665,6 +2669,28 @@ try {
     pass('posting snapshot formatter preserves JD text while dropping empty descriptions');
   } else {
     fail(`posting snapshot formatter produced unexpected record: ${JSON.stringify(snapshotRecord)}`);
+  }
+
+  const workdayDetailApi = resolveWorkdayDetailApi('https://workiva.wd503.myworkdayjobs.com/en-US/careers/job/Senior-AI-Product-Manager_R11885');
+  if (
+    workdayDetailApi === 'https://workiva.wd503.myworkdayjobs.com/wday/cxs/workiva/careers/job/Senior-AI-Product-Manager_R11885' &&
+    resolveWorkdayDetailApi('http://workiva.wd503.myworkdayjobs.com/en-US/careers/job/Role_R1') === null &&
+    resolveWorkdayDetailApi('https://example.com/careers/job/Role_R1') === null
+  ) {
+    pass('posting backfill maps Workday posting URLs to CXS detail API safely');
+  } else {
+    fail(`Workday detail API mapping unexpected: ${workdayDetailApi}`);
+  }
+
+  const workdayText = workdayDescription({
+    jobPostingInfo: {
+      jobDescription: '<p>Build useful systems.</p><ul><li>Own AI workflow quality</li></ul>',
+    },
+  });
+  if (workdayText.includes('Build useful systems.') && workdayText.includes('Own AI workflow quality')) {
+    pass('posting backfill extracts readable text from Workday detail HTML');
+  } else {
+    fail(`Workday description extraction unexpected: ${JSON.stringify(workdayText)}`);
   }
 
   try {
