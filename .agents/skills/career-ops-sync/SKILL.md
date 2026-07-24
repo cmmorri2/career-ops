@@ -7,7 +7,7 @@ description: Refresh the career-ops data pipeline end to end. Use when the user 
 
 ## Overview
 
-Run the repo-native refresh flow for `/Users/chadmorris/PycharmProjects/career-ops`. Prefer the existing npm scripts and report concrete counts, not a conceptual status summary.
+Run the repo-native refresh flow from the career-ops repository root. Prefer the existing npm scripts and report concrete counts, not a conceptual status summary.
 
 ## Preflight
 

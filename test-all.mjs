@@ -2470,6 +2470,7 @@ try {
     shouldDedupScanHistoryRow,
     formatPipelineOffer,
     formatScanHistoryRow,
+    formatPostingSnapshotRecord,
   } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   const filter = buildLocationFilter({
@@ -2644,6 +2645,317 @@ try {
     pass('scan-history writer preserves row shape and neutralizes spreadsheet formulas');
   } else {
     fail(`scan-history metadata sanitizer produced unsafe TSV row: ${JSON.stringify(historyColumns)}`);
+  }
+
+  const snapshotRecord = formatPostingSnapshotRecord({
+    ...hostileOffer,
+    description: 'About the role\r\nBuild useful systems.\0\n\nRequirements: judgment.',
+    salary: { min: 120000, max: 150000, currency: 'USD' },
+    trustLevel: 'high',
+    trustFlags: ['official_domain'],
+  }, '2026-06-18');
+  if (
+    snapshotRecord &&
+    snapshotRecord.url === 'https://jobs.example.com/123|evil' &&
+    snapshotRecord.captured_at === '2026-06-18T00:00:00Z' &&
+    snapshotRecord.description === 'About the role\nBuild useful systems.\n\nRequirements: judgment.' &&
+    JSON.parse(snapshotRecord.raw_source).source === 'local-parser' &&
+    formatPostingSnapshotRecord({ url: 'https://jobs.example.com/empty', description: '   ' }, '2026-06-18') === null
+  ) {
+    pass('posting snapshot formatter preserves JD text while dropping empty descriptions');
+  } else {
+    fail(`posting snapshot formatter produced unexpected record: ${JSON.stringify(snapshotRecord)}`);
+  }
+
+  try {
+    const py = `
+import importlib.util, json, os, pathlib, sys
+root = pathlib.Path(os.environ["ROOT"])
+spec = importlib.util.spec_from_file_location("career_ops_db", root / "db" / "career_ops_db.py")
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+rows = [
+    mod.parse_pipeline_line("- [ ] https://jobs.example.com/1 | Acme | AI Product Manager | San Diego, CA | note: LinkedIn email lead; new-company-discovery | Triage 3.6/5 | Triage - moderate fit"),
+    mod.parse_pipeline_line("- [ ] https://jobs.example.com/2 | Acme | AI Product Manager | Remote | 180000-220000 USD | Triage 4.2/5 | Triage - strong fit"),
+    mod.parse_pipeline_line("- [ ] https://jobs.example.com/3 | Acme | AI Product Manager | Remote | Compensation: $180K-$220K | note: posted range"),
+]
+print(json.dumps([row.__dict__ for row in rows]))
+`;
+    const out = execFileSync('python3', ['-c', py], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, ROOT },
+    }).trim();
+    const parsed = JSON.parse(out);
+    if (
+      parsed[0].location === 'San Diego, CA' &&
+      parsed[0].compensation === null &&
+      parsed[0].score === 'Triage 3.6/5' &&
+      parsed[0].note.includes('LinkedIn email lead') &&
+      parsed[1].compensation === '180000-220000 USD' &&
+      parsed[2].compensation === '$180K-$220K' &&
+      parsed[2].note === 'note: posted range'
+    ) {
+      pass('db pipeline parser keeps notes out of compensation while preserving real pay');
+    } else {
+      fail(`db pipeline parser note/compensation result unexpected: ${out}`);
+    }
+  } catch (e) {
+    fail(`db pipeline parser note/compensation test crashed: ${e.message}`);
+  }
+
+  const recordTmp = mkdtempSync(join(tmpdir(), 'career-ops-record-snapshot-'));
+  const recordPath = join(recordTmp, 'posting-snapshots.jsonl');
+  const recordInput = join(recordTmp, 'jd.txt');
+  writeFileSync(recordInput, 'Full rendered JD from pipeline step\nResponsibilities: build and parse.', 'utf-8');
+  try {
+    const out = execFileSync(NODE, [
+      join(ROOT, 'record-posting-snapshot.mjs'),
+      '--url', 'https://jobs.example.com/pipeline-role',
+      '--company', 'Pipeline Co',
+      '--title', 'Pipeline Role',
+      '--source', 'pipeline',
+      '--file', recordInput,
+      '--captured-at', '2026-06-19',
+    ], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, CAREER_OPS_POSTING_SNAPSHOTS: recordPath },
+    }).trim();
+    const cli = JSON.parse(out);
+    const rows = readFileSync(recordPath, 'utf-8').trim().split('\n').map(line => JSON.parse(line));
+    if (
+      cli.saved === true &&
+      cli.path === recordPath &&
+      rows.length === 1 &&
+      rows[0].url === 'https://jobs.example.com/pipeline-role' &&
+      rows[0].captured_at === '2026-06-19T00:00:00Z' &&
+      rows[0].description.includes('Full rendered JD') &&
+      JSON.parse(rows[0].raw_source).source === 'pipeline'
+    ) {
+      pass('record-posting-snapshot CLI persists extracted pipeline JD text to sidecar');
+    } else {
+      fail(`record-posting-snapshot CLI produced unexpected output: ${out} / ${JSON.stringify(rows)}`);
+    }
+  } catch (e) {
+    fail(`record-posting-snapshot CLI test crashed: ${e.message}`);
+  } finally {
+    rmSync(recordTmp, { recursive: true, force: true });
+  }
+
+  const snapshotTmp = mkdtempSync(join(tmpdir(), 'career-ops-snapshots-'));
+  const snapshotPath = join(snapshotTmp, 'posting-snapshots.jsonl');
+  const snapshotDb = join(snapshotTmp, 'career-ops.sqlite');
+  writeFileSync(snapshotPath, [
+    JSON.stringify({
+      url: 'https://jobs.example.com/existing',
+      captured_at: '2026-06-18T00:00:00Z',
+      title: 'Existing Role',
+	      company: 'Acme',
+	      location: 'Remote',
+	      description: 'Existing role description',
+	      raw_source: '{"source":"test","salary":{"min":120000,"max":150000,"currency":"USD","period":"year"}}',
+    }),
+    JSON.stringify({
+      url: 'https://jobs.example.com/new',
+      captured_at: '2026-06-18T00:00:00Z',
+      title: 'New Role',
+      company: 'Beta',
+      location: 'NYC',
+      description: 'New role description',
+      raw_source: '{"source":"test"}',
+    }),
+    '{"not valid json"',
+    JSON.stringify({ url: 'https://jobs.example.com/blank', description: '   ' }),
+  ].join('\n') + '\n', 'utf-8');
+  try {
+    const py = `
+import importlib.util, json, os, pathlib, sys
+root = pathlib.Path(os.environ["ROOT"])
+spec = importlib.util.spec_from_file_location("career_ops_db", root / "db" / "career_ops_db.py")
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+mod.POSTING_SNAPSHOTS = pathlib.Path(os.environ["SNAPSHOT_PATH"])
+con = mod.connect(pathlib.Path(os.environ["SNAPSHOT_DB"]))
+try:
+    mod.init_db(con)
+    company_id = mod.upsert_company(con, "Acme")
+    con.execute(
+        "INSERT INTO job_postings(url, company_id, company_name, title, location) VALUES (?, ?, ?, ?, ?)",
+        ("https://jobs.example.com/existing", company_id, "Acme", "Existing Role", "Remote"),
+    )
+    first = mod.import_posting_snapshots(con)
+    second = mod.import_posting_snapshots(con)
+    con.commit()
+    rows = con.execute(
+        "SELECT jp.url, jp.salary_min, jp.salary_max, jp.salary_currency, jp.salary_period, ps.description FROM posting_snapshots ps JOIN job_postings jp ON jp.id = ps.posting_id ORDER BY jp.url"
+    ).fetchall()
+    print(json.dumps({"first": first, "second": second, "rows": [dict(row) for row in rows]}))
+finally:
+    con.close()
+`;
+    const out = execFileSync('python3', ['-c', py], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, ROOT, SNAPSHOT_PATH: snapshotPath, SNAPSHOT_DB: snapshotDb },
+    }).trim();
+    const parsed = JSON.parse(out);
+    if (
+      parsed.first === 2 &&
+	      parsed.second === 0 &&
+	      parsed.rows.length === 2 &&
+	      parsed.rows[0].description === 'Existing role description' &&
+	      parsed.rows[0].salary_min === 120000 &&
+	      parsed.rows[0].salary_max === 150000 &&
+	      parsed.rows[0].salary_currency === 'USD' &&
+	      parsed.rows[0].salary_period === 'year' &&
+	      parsed.rows[1].url === 'https://jobs.example.com/new'
+	    ) {
+	      pass('db importer loads posting snapshot sidecar idempotently and normalizes salary metadata');
+    } else {
+      fail(`db importer snapshot result unexpected: ${out}`);
+    }
+  } catch (e) {
+    fail(`db importer snapshot test crashed: ${e.message}`);
+	  } finally {
+	    rmSync(snapshotTmp, { recursive: true, force: true });
+	  }
+
+	  const dispositionTmp = mkdtempSync(join(tmpdir(), 'career-ops-disposition-'));
+	  const dispositionDb = join(dispositionTmp, 'career-ops.sqlite');
+	  const dispositionPipeline = join(dispositionTmp, 'pipeline.md');
+	  try {
+	    const py = `
+import importlib.util, json, os, pathlib, sys
+root = pathlib.Path(os.environ["ROOT"])
+spec = importlib.util.spec_from_file_location("career_ops_db", root / "db" / "career_ops_db.py")
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+mod.PIPELINE = pathlib.Path(os.environ["PIPELINE_PATH"])
+con = mod.connect(pathlib.Path(os.environ["DISPOSITION_DB"]))
+try:
+    mod.init_db(con)
+    company_id = mod.upsert_company(con, "Acme")
+    con.execute(
+        "INSERT INTO job_postings(url, company_id, company_name, title, pipeline_state, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("https://jobs.example.com/discarded", company_id, "Acme", "Discarded Role", "discarded", "expired", "not enough product discovery"),
+    )
+    mod.export_pipeline(con, pathlib.Path(os.environ["PIPELINE_PATH"]))
+    exported = pathlib.Path(os.environ["PIPELINE_PATH"]).read_text(encoding="utf-8")
+    imported = mod.import_pipeline(con)
+    con.commit()
+    row = con.execute("SELECT pipeline_state, status, notes FROM job_postings WHERE url = ?", ("https://jobs.example.com/discarded",)).fetchone()
+    print(json.dumps({"imported": imported, "exported": exported, "row": dict(row)}))
+finally:
+    con.close()
+`;
+	    const out = execFileSync('python3', ['-c', py], {
+	      cwd: ROOT,
+	      encoding: 'utf-8',
+	      timeout: 30000,
+	      env: { ...process.env, ROOT, PIPELINE_PATH: dispositionPipeline, DISPOSITION_DB: dispositionDb },
+	    }).trim();
+	    const parsed = JSON.parse(out);
+	    if (
+	      parsed.exported.includes('## Expired') &&
+	      parsed.exported.includes('https://jobs.example.com/discarded') &&
+	      parsed.row.pipeline_state === 'discarded' &&
+	      parsed.row.status === 'expired' &&
+	      parsed.row.notes === 'not enough product discovery'
+	    ) {
+	      pass('pipeline export/import preserves user disposition when a discarded posting expires');
+	    } else {
+	      fail(`pipeline disposition round-trip unexpected: ${out}`);
+	    }
+	  } catch (e) {
+	    fail(`pipeline disposition round-trip test crashed: ${e.message}`);
+	  } finally {
+	    rmSync(dispositionTmp, { recursive: true, force: true });
+	  }
+
+	  const discoveryTmp = mkdtempSync(join(tmpdir(), 'career-ops-role-discovery-'));
+  const discoveryLeads = join(discoveryTmp, 'linkedin-leads.jsonl');
+  const discoveryDb = join(discoveryTmp, 'career-ops.sqlite');
+  writeFileSync(discoveryLeads, [
+    JSON.stringify({
+      alertName: 'Fwd: New jobs similar to Principal Product Manager, AI agents - Search at Elastic',
+      company: 'Elastic',
+      title: 'Principal Product Manager, AI agents - Search',
+      location: 'United States',
+      workModel: 'Remote',
+      jobUrl: 'https://www.linkedin.com/jobs/view/1',
+      receivedAt: 'Thu, 16 Jul 2026 01:09:13 -0400',
+    }),
+    JSON.stringify({
+      alertName: 'Fwd: New jobs similar to Principal Product Manager, AI agents - Search at Elastic',
+      company: 'Acme',
+      title: 'Senior AI Solutions Consultant',
+      location: 'Nashville, TN',
+      workModel: 'Hybrid',
+      jobUrl: 'https://www.linkedin.com/jobs/view/2',
+      receivedAt: 'Thu, 16 Jul 2026 01:09:13 -0400',
+    }),
+  ].join('\n') + '\n', 'utf-8');
+  try {
+    const py = `
+import importlib.util, json, os, pathlib, sys
+root = pathlib.Path(os.environ["ROOT"])
+spec = importlib.util.spec_from_file_location("career_ops_db", root / "db" / "career_ops_db.py")
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+con = mod.connect(pathlib.Path(os.environ["DISCOVERY_DB"]))
+try:
+    mod.init_db(con)
+    result = mod.import_linkedin_role_discovery(con, pathlib.Path(os.environ["DISCOVERY_LEADS"]))
+    con.commit()
+    clusters = con.execute(
+        "SELECT normalized_role, display_role, coverage_status, evidence_count FROM role_discovery_clusters ORDER BY normalized_role"
+    ).fetchall()
+    leads = con.execute(
+        "SELECT source_detail, seed_company, seed_title, triage_score FROM role_discovery_leads ORDER BY company"
+    ).fetchall()
+    searches = con.execute("SELECT query, target_count FROM role_discovery_searches").fetchall()
+    print(json.dumps({
+        "result": result,
+        "clusters": [dict(row) for row in clusters],
+        "leads": [dict(row) for row in leads],
+        "searches": [dict(row) for row in searches],
+    }))
+finally:
+    con.close()
+`;
+    const out = execFileSync('python3', ['-c', py], {
+      cwd: ROOT,
+      encoding: 'utf-8',
+      timeout: 30000,
+      env: { ...process.env, ROOT, DISCOVERY_LEADS: discoveryLeads, DISCOVERY_DB: discoveryDb },
+    }).trim();
+    const parsed = JSON.parse(out);
+    const clusterKeys = parsed.clusters.map((row) => row.normalized_role).sort();
+    if (
+      parsed.result.linkedin_leads === 2 &&
+      parsed.result.clusters === 2 &&
+      JSON.stringify(clusterKeys) === JSON.stringify(['ai_product_management', 'ai_solutions_architecture']) &&
+      parsed.clusters.every((row) => row.coverage_status === 'under_covered') &&
+      parsed.leads.every((row) => row.source_detail === 'linkedin_email_similar' && row.seed_company === 'Elastic') &&
+      parsed.searches.length === 2 &&
+      parsed.searches.every((row) => row.target_count === 10)
+    ) {
+      pass('role discovery importer clusters LinkedIn similar-job leads and suggests bounded searches');
+    } else {
+      fail(`role discovery importer result unexpected: ${out}`);
+    }
+  } catch (e) {
+    fail(`role discovery importer test crashed: ${e.message}`);
+  } finally {
+    rmSync(discoveryTmp, { recursive: true, force: true });
   }
 
   // ── content_filter (#734) ──

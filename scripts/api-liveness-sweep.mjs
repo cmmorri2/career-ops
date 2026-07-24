@@ -147,15 +147,73 @@ function noteFor(today, verdict) {
   return `Active check ${today}: ${verdict.result} (${verdict.reason})`;
 }
 
-function markExpired(db, id, note) {
+function ensurePostingEvents(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS posting_events (
+      id INTEGER PRIMARY KEY,
+      posting_id INTEGER NOT NULL REFERENCES job_postings(id) ON DELETE CASCADE,
+      event_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      event_type TEXT NOT NULL,
+      from_pipeline_state TEXT,
+      to_pipeline_state TEXT,
+      from_status TEXT,
+      to_status TEXT,
+      reason TEXT,
+      notes TEXT,
+      source TEXT,
+      raw_text TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_posting_events_posting ON posting_events(posting_id);
+    CREATE INDEX IF NOT EXISTS idx_posting_events_type ON posting_events(event_type);
+  `);
+}
+
+function recordPostingEvent(db, id, event) {
+  db.prepare(`
+    INSERT INTO posting_events(
+      posting_id, event_type, from_pipeline_state, to_pipeline_state,
+      from_status, to_status, reason, notes, source, raw_text
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    event.eventType,
+    event.fromPipelineState || null,
+    event.toPipelineState || null,
+    event.fromStatus || null,
+    event.toStatus || null,
+    event.reason || null,
+    event.notes || null,
+    event.source || null,
+    event.rawText || null,
+  );
+}
+
+function expiredPipelineState(previousState) {
+  return ['pending', 'expired'].includes(String(previousState || '').toLowerCase()) ? 'expired' : previousState;
+}
+
+function markExpired(db, row, note, verdict) {
+  const nextState = expiredPipelineState(row.pipeline_state);
   db.prepare(`
     UPDATE job_postings
-    SET pipeline_state = 'expired',
+    SET pipeline_state = ?,
         status = 'expired',
         notes = CASE WHEN COALESCE(notes, '') = '' THEN ? ELSE notes || '; ' || ? END,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(note, note, id);
+  `).run(nextState, note, note, row.id);
+  recordPostingEvent(db, row.id, {
+    eventType: 'liveness_expired',
+    fromPipelineState: row.pipeline_state,
+    toPipelineState: nextState,
+    fromStatus: row.status,
+    toStatus: 'expired',
+    reason: verdict?.reason || null,
+    notes: note,
+    source: 'api-liveness-sweep',
+    rawText: verdict ? JSON.stringify(verdict) : null,
+  });
 }
 
 function markActive(db, id) {
@@ -176,6 +234,7 @@ async function main() {
   const DatabaseSync = await loadSqlite();
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA foreign_keys = ON');
+  ensurePostingEvents(db);
 
   const rows = loadRows(db, opts);
   const today = new Date().toISOString().slice(0, 10);
@@ -200,7 +259,7 @@ async function main() {
     const result = { ...row, ...verdict };
     summary.results.push(result);
     if (!opts.dryRun && verdict.result === 'expired') {
-      markExpired(db, row.id, noteFor(today, verdict));
+      markExpired(db, row, noteFor(today, verdict), verdict);
       summary.updated += 1;
     } else if (!opts.dryRun && verdict.result === 'active') {
       markActive(db, row.id);

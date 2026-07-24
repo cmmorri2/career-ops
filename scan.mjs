@@ -57,6 +57,7 @@ const PROFILE_PATH = process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
 const SCAN_HISTORY_PATH = 'data/scan-history.tsv';
 const PIPELINE_PATH = 'data/pipeline.md';
 const APPLICATIONS_PATH = 'data/applications.md';
+const POSTING_SNAPSHOTS_PATH = process.env.CAREER_OPS_POSTING_SNAPSHOTS || 'data/cache/posting-snapshots.jsonl';
 const PROVIDERS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'providers');
 
 // Ensure required directories exist (fresh setup)
@@ -607,6 +608,35 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
   ].map(sanitizeTsvField).join('\t');
 }
 
+function normalizeSnapshotText(value) {
+  return String(value ?? '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\0/g, '')
+    .trim();
+}
+
+export function formatPostingSnapshotRecord(offer, date) {
+  const description = normalizeSnapshotText(offer.description);
+  if (!description) return null;
+  const url = normalizeScanUrl(offer.url);
+  if (!url) return null;
+  const sourceMeta = {
+    source: normalizeScanScalar(offer.source),
+  };
+  if (offer.salary && typeof offer.salary === 'object') sourceMeta.salary = offer.salary;
+  if (offer.trustLevel) sourceMeta.trustLevel = offer.trustLevel;
+  if (Array.isArray(offer.trustFlags) && offer.trustFlags.length > 0) sourceMeta.trustFlags = offer.trustFlags;
+  return {
+    url,
+    captured_at: `${date}T00:00:00Z`,
+    title: normalizeSnapshotText(offer.title),
+    company: normalizeSnapshotText(offer.company),
+    location: normalizeSnapshotText(offer.location),
+    description,
+    raw_source: JSON.stringify(sourceMeta),
+  };
+}
+
 // Standard skeleton created on fresh install — matches the format documented
 // in modes/pipeline.md and expected by /career-ops pipeline.
 const PIPELINE_SKELETON = `# Pipeline — Pending URLs
@@ -671,6 +701,16 @@ export function appendToScanHistory(offers, date, status = 'added') {
   const lines = offers.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
   appendFileSync(SCAN_HISTORY_PATH, lines, 'utf-8');
+}
+
+export function appendPostingSnapshots(offers, date) {
+  const records = offers
+    .map(offer => formatPostingSnapshotRecord(offer, date))
+    .filter(Boolean);
+  if (records.length === 0) return;
+  mkdirSync(path.dirname(POSTING_SNAPSHOTS_PATH), { recursive: true });
+  const lines = records.map(record => JSON.stringify(record)).join('\n') + '\n';
+  appendFileSync(POSTING_SNAPSHOTS_PATH, lines, 'utf-8');
 }
 
 // ── Parallel fetch with concurrency limit ───────────────────────────
@@ -1080,6 +1120,7 @@ async function main() {
   if (!dryRun && verifiedOffers.length > 0) {
     appendToPipeline(verifiedOffers);
     appendToScanHistory(verifiedOffers, date);
+    appendPostingSnapshots(verifiedOffers, date);
   }
   if (!dryRun && cooldownOffers.length > 0) {
     const cooldownGroups = {};

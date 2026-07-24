@@ -1,4 +1,4 @@
-import { pipelineSummary } from "@/lib/career-ops";
+import { pipelineSummary, readTitleTrends } from "@/lib/career-ops";
 import { canonStatus, scoreNum } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +15,7 @@ const STAGES: { key: string; label: string }[] = [
 
 export default function Analytics() {
   const { applications } = pipelineSummary();
+  const titleTrends = readTitleTrends();
   const total = applications.length;
 
   const stageCounts = STAGES.map((s) => ({
@@ -66,11 +67,59 @@ export default function Analytics() {
         ))}
       </Section>
 
+      <Section title="New title trends" id="title-trends">
+        <div className="space-y-4">
+          {titleTrends.length === 0 ? (
+            <div className="rounded-md border border-border bg-surface/50 p-4 text-sm text-muted">
+              No scan-history-backed job title trends yet.
+            </div>
+          ) : (
+            titleTrends.map((day) => <TitleTrendDay key={day.date} day={day} />)
+          )}
+        </div>
+      </Section>
+
       <Section title="Top companies" id="companies">
         {topCompanies.map(([name, n]) => (
           <Bar key={name} label={name} value={n} pct={(n / maxCompany) * 100} />
         ))}
       </Section>
+    </div>
+  );
+}
+
+function TitleTrendDay({ day }: { day: ReturnType<typeof readTitleTrends>[number] }) {
+  const max = Math.max(1, ...day.clusters.map((c) => c.count));
+  return (
+    <div className="rounded-lg border border-border bg-surface/40 p-4">
+      <div className="flex items-baseline justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">{day.date}</h3>
+          <p className="mt-0.5 text-xs text-faint">{day.total} new posting{day.total === 1 ? "" : "s"} discovered</p>
+        </div>
+      </div>
+      <div className="mt-4 space-y-3">
+        {day.clusters.map((cluster) => (
+          <div key={cluster.clusterKey}>
+            <div className="flex items-center gap-3">
+              <div className="w-44 shrink-0 truncate text-sm text-muted">{cluster.clusterLabel}</div>
+              <div className="relative h-6 flex-1 overflow-hidden rounded-md bg-background/60">
+                <div
+                  className="h-full rounded-md bg-gradient-to-r from-brand/70 to-brand/35"
+                  style={{ width: `${Math.max((cluster.count / max) * 100, cluster.count > 0 ? 5 : 0)}%` }}
+                />
+              </div>
+              <div className="w-24 shrink-0 text-right text-sm tabular-nums">
+                {cluster.count}
+                <span className="ml-1 text-xs text-faint">{cluster.activeCount} active</span>
+              </div>
+            </div>
+            <div className="mt-1 pl-44 text-xs text-faint">
+              {cluster.examples.map((example) => `${example.company}: ${example.title}`).join(" | ")}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -22,6 +22,7 @@ This complements — does not replace — the per-URL liveness gate in `auto-pip
 2. **For each surviving pending URL**:
    a. Claim the next sequential `REPORT_NUM` atomically by running `node reserve-report-num.mjs` (and release the sentinel using `node reserve-report-num.mjs --release <num>` after the report is written)
    b. **Extract JD** using Playwright (browser_navigate + browser_snapshot) → WebFetch → WebSearch
+      - After extracting a non-empty JD, write that exact text to a temporary file and run `npm run posting:snapshot -- --url "{url}" --company "{company}" --title "{role}" --source pipeline --file <tempfile>` before evaluation. If this fails, continue processing but include the snapshot failure in the final summary. The next `npm run db:import` links the saved snapshot into `posting_snapshots`.
    c. If the URL is not accessible → mark as `- [!]` with a note and continue
    d. **Execute full auto-pipeline**: Evaluation A-F → Report .md → durable HTML + PDF → Tracker
    e. **Move from "Pending" to "Processed"**: `- [x] #NNN | URL | Company | Role | Score/5 | PDF ✅`

@@ -16,6 +16,16 @@ If the input is a **URL** (not pasted JD text), follow this strategy to extract 
 
 **If the input is JD text** (not a URL): use directly, without needing to fetch.
 
+After extracting a non-empty JD from a URL, persist the exact extracted text
+before evaluation so the source evidence survives later posting expiry:
+
+1. Write the extracted JD text to a temporary file.
+2. Run `npm run posting:snapshot -- --url "{url}" --company "{company}" --title "{role}" --source auto-pipeline --file <tempfile>`.
+3. Continue even if snapshot recording fails, but mention the failure in the final summary.
+
+The next `npm run db:import` links the saved snapshot into `posting_snapshots`.
+If the input was pasted JD text with no URL, skip this snapshot step.
+
 ## Step 0.5 — Liveness gate
 
 Before running any evaluation, confirm the posting is still live. The Step 0 Playwright snapshot already holds the evidence — judge it now, before spending tokens on the A-G evaluation, the report, or a PDF. A 404/expired page silently served as a static fallback ("position filled", empty shell) otherwise scores a full evaluation against phantom content.

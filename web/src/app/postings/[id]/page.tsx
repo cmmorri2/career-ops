@@ -42,6 +42,7 @@ export default async function PostingPage({ params }: { params: Promise<{ id: st
   const snapshot = readPostingSnapshot(posting.id);
   const artifacts = readPostingArtifacts(posting.id);
   const description = snapshot?.description?.trim();
+  const isExpired = posting.status === "expired" || posting.pipelineState === "expired";
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8 max-sm:pb-24">
@@ -59,6 +60,7 @@ export default async function PostingPage({ params }: { params: Promise<{ id: st
             <h1 className="mt-3 max-w-3xl font-display text-3xl leading-tight tracking-tight text-landing">{posting.role}</h1>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Badge tone={scoreTone(posting.score)}>{posting.score || "not scored"}</Badge>
+              {isExpired && <Badge tone="bad">expired</Badge>}
               <Badge tone={posting.pipelineState === "shortlisted" ? "good" : posting.pipelineState === "pending" ? "warn" : posting.pipelineState === "discarded" || posting.pipelineState === "expired" ? "bad" : "muted"} className="capitalize">
                 {posting.pipelineState}
               </Badge>
@@ -111,7 +113,13 @@ export default async function PostingPage({ params }: { params: Promise<{ id: st
                     <p>{posting.notes}</p>
                   </>
                 )}
-                <p>Use <span className="font-medium text-foreground">Open posting</span> to inspect the live JD, or run <span className="font-medium text-foreground">Evaluate</span> to create the deeper report and tailored package.</p>
+                <p>
+                  {isExpired ? (
+                    <>Restore this posting before evaluating it or changing its triage state.</>
+                  ) : (
+                    <>Use <span className="font-medium text-foreground">Open posting</span> to inspect the live JD, or run <span className="font-medium text-foreground">Evaluate</span> to create the deeper report and tailored package.</>
+                  )}
+                </p>
               </div>
             )}
           </div>
@@ -126,6 +134,7 @@ export default async function PostingPage({ params }: { params: Promise<{ id: st
               <div className="flex gap-3"><dt className="w-24 shrink-0 text-faint">URL</dt><dd className="min-w-0 truncate text-muted">{posting.url}</dd></div>
               <div className="flex gap-3"><dt className="w-24 shrink-0 text-faint">ID</dt><dd className="text-muted">{posting.id}</dd></div>
               <div className="flex gap-3"><dt className="w-24 shrink-0 text-faint">State</dt><dd className="text-muted">{posting.pipelineState}</dd></div>
+              <div className="flex gap-3"><dt className="w-24 shrink-0 text-faint">Availability</dt><dd className={isExpired ? "text-red-300" : "text-muted"}>{posting.status}</dd></div>
               {posting.reportPath && <div className="flex gap-3"><dt className="w-24 shrink-0 text-faint">Report</dt><dd className="min-w-0 truncate text-muted">{posting.reportPath}</dd></div>}
               {posting.pdfPath && <div className="flex gap-3"><dt className="w-24 shrink-0 text-faint">PDF</dt><dd className="min-w-0 truncate text-muted">{posting.pdfPath}</dd></div>}
               {snapshot && <div className="flex gap-3"><dt className="w-24 shrink-0 text-faint">Snapshot</dt><dd className="text-muted">{snapshot.capturedAt}</dd></div>}

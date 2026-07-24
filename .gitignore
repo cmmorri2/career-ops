@@ -21,6 +21,8 @@ data/parser-output/**/*.json
 !data/parser-output/**/.gitkeep
 data/cache/ats-companies/
 data/cache/linkedin-email-raw/
+data/cache/posting-snapshots.jsonl
+data/triage-email/
 __pycache__/
 *.pyc
 reports/*
@@ -36,6 +38,8 @@ batch/batch-state.tsv
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
+logs/*
+!logs/.gitkeep
 jds/*
 !jds/.gitkeep
 

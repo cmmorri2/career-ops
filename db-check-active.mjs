@@ -4,9 +4,9 @@
  * db-check-active.mjs -- DB-backed liveness sweep for job_postings.
  *
  * Reads postings from data/career-ops.sqlite, checks whether each URL is still
- * active using the existing zero-token liveness ladder, and moves confirmed
- * closed postings to pipeline_state='expired'. Uncertain checks are noted but
- * never expired.
+ * active using the existing zero-token liveness ladder. Confirmed closed
+ * postings get status='expired'; meaningful dispositions like discarded are
+ * preserved in pipeline_state for later scoring analysis.
  */
 
 import { existsSync } from 'fs';
@@ -164,7 +164,29 @@ function openDb(DatabaseSync, dbPath) {
   }
   const db = new DatabaseSync(fullPath);
   db.exec('PRAGMA foreign_keys = ON');
+  ensurePostingEvents(db);
   return db;
+}
+
+function ensurePostingEvents(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS posting_events (
+      id INTEGER PRIMARY KEY,
+      posting_id INTEGER NOT NULL REFERENCES job_postings(id) ON DELETE CASCADE,
+      event_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      event_type TEXT NOT NULL,
+      from_pipeline_state TEXT,
+      to_pipeline_state TEXT,
+      from_status TEXT,
+      to_status TEXT,
+      reason TEXT,
+      notes TEXT,
+      source TEXT,
+      raw_text TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_posting_events_posting ON posting_events(posting_id);
+    CREATE INDEX IF NOT EXISTS idx_posting_events_type ON posting_events(event_type);
+  `);
 }
 
 function quoteState(state) {
@@ -208,15 +230,52 @@ function appendNote(db, id, note) {
   `).run(note, note, id);
 }
 
-function markExpired(db, id, note) {
+function recordPostingEvent(db, id, event) {
+  db.prepare(`
+    INSERT INTO posting_events(
+      posting_id, event_type, from_pipeline_state, to_pipeline_state,
+      from_status, to_status, reason, notes, source, raw_text
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    event.eventType,
+    event.fromPipelineState || null,
+    event.toPipelineState || null,
+    event.fromStatus || null,
+    event.toStatus || null,
+    event.reason || null,
+    event.notes || null,
+    event.source || null,
+    event.rawText || null,
+  );
+}
+
+function expiredPipelineState(previousState) {
+  return ['pending', 'expired'].includes(String(previousState || '').toLowerCase()) ? 'expired' : previousState;
+}
+
+function markExpired(db, posting, note, verdict) {
+  const nextState = expiredPipelineState(posting.pipeline_state);
   db.prepare(`
     UPDATE job_postings
-    SET pipeline_state = 'expired',
+    SET pipeline_state = ?,
         status = 'expired',
         notes = CASE WHEN COALESCE(notes, '') = '' THEN ? ELSE notes || '; ' || ? END,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
-  `).run(note, note, id);
+  `).run(nextState, note, note, posting.id);
+  recordPostingEvent(db, posting.id, {
+    eventType: 'liveness_expired',
+    fromPipelineState: posting.pipeline_state,
+    toPipelineState: nextState,
+    fromStatus: posting.status,
+    toStatus: 'expired',
+    reason: verdict?.reason || null,
+    notes: note,
+    source: 'db-check-active',
+    rawText: verdict ? JSON.stringify(verdict) : null,
+  });
 }
 
 function markActive(db, id) {
@@ -275,7 +334,7 @@ async function main() {
 
     if (!opts.dryRun) {
       if (verdict.result === 'expired') {
-        markExpired(db, posting.id, note);
+        markExpired(db, posting, note, verdict);
         summary.updated++;
       } else if (verdict.result === 'active') {
         markActive(db, posting.id);

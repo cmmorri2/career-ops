@@ -17,6 +17,10 @@ const HIDDEN_KEY = "career-ops:hidden";
 const CONFIG_KEY = "career-ops:config";
 const BATCH = 20;
 
+function isClosed(job: InboxJob): boolean {
+  return job.status === "expired" || job.pipelineState === "expired";
+}
+
 // The inbox as a TRIAGE surface: Abundance → Triage → Shortlist → Opt-in Score.
 // Default is a small fresh batch (never the full wall); free facets + Save/Skip narrow
 // it; only "Score shortlist" spends tokens. 🔴 The shell is agnostic to what makes a
@@ -75,6 +79,7 @@ export function InboxTriage({ inbox, mode = "inbox" }: { inbox: InboxJob[]; mode
     const seen = new Set<string>();
     const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null }[] = [];
     for (const job of inbox) {
+      if (isClosed(job)) continue;
       if (seen.has(job.url)) continue;
       seen.add(job.url);
       out.push({ job, source: sourceFromUrl(job.url), seniority: seniorityFromTitle(job.role), age: daysSince(job.postedAt, now) });

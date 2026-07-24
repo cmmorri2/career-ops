@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight, MapPin, DollarSign, Clock3, ExternalLink, BookmarkCheck, Archive } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, MapPin, DollarSign, Clock3, ExternalLink, BookmarkCheck, Archive, RotateCcw } from "lucide-react";
 import type { Application, InboxJob, PipelinePosting } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
@@ -428,7 +428,7 @@ export function PipelineView({
       ) : tab === "EXPIRED" ? (
         postings.length > 0 ? (
           filteredPostings.length > 0 ? (
-            <PostingsTable
+            <ExpiredPipelinePostingsTable
               postings={filteredPostings}
               sort={sort}
               onSort={(key) => setParams({ sort: key, dir: sort.key === key ? sort.dir * -1 : key === "location" ? 1 : -1 })}
@@ -438,7 +438,7 @@ export function PipelineView({
             <InboxEmpty count={0} filtered={false} />
           )
         ) : expiredInbox.length > 0 ? (
-          <ExpiredPostingsTable postings={expiredInbox} />
+          <LegacyExpiredPostingsTable postings={expiredInbox} />
         ) : (
           <InboxEmpty count={0} filtered={false} />
         )
@@ -703,12 +703,132 @@ function PostingsTable({
   );
 }
 
-function ExpiredPostingsTable({ postings }: { postings: InboxJob[] }) {
+function ExpiredPipelinePostingsTable({
+  postings,
+  sort,
+  onSort,
+  onChanged,
+}: {
+  postings: PipelinePosting[];
+  sort: { key: SortKey; dir: 1 | -1 };
+  onSort: (key: SortKey) => void;
+  onChanged: () => void;
+}) {
+  const restore = async (posting: PipelinePosting) => {
+    const res = await fetch("/api/postings/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: posting.id, url: posting.url, state: "pending", restore: true }),
+    });
+    if (res.ok) {
+      window.dispatchEvent(new CustomEvent("co-pipeline-changed"));
+      onChanged();
+    }
+  };
+
+  return (
+    <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
+      <table className="w-full min-w-[1120px] text-sm">
+        <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
+          <tr>
+            {[
+              ["company", "company"],
+              ["role", "role"],
+              ["score", "score"],
+              ["status", "disposition"],
+              ["date", "first seen"],
+              ["last", "last seen"],
+              ["location", "mobility"],
+              ["pay", "pay"],
+            ].map(([key, label]) => (
+              <th
+                key={key}
+                className="cursor-pointer select-none px-4 py-2.5 font-medium hover:text-foreground"
+                onClick={() => onSort(key as SortKey)}
+              >
+                <span className="inline-flex items-center gap-1">
+                  {label}
+                  <ChevronsUpDown className={cn("size-3", sort.key === key && "text-brand")} />
+                </span>
+              </th>
+            ))}
+            <th className="px-4 py-2.5 font-medium">source</th>
+            <th className="px-4 py-2.5 font-medium"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {postings.map((p) => (
+            <tr key={p.id || p.url} className="group transition-colors hover:bg-surface/40">
+              <td className="px-4 py-3 font-medium">
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <CompanyLogo name={p.company} size={20} />
+                  <span className="truncate">{p.company}</span>
+                </div>
+              </td>
+              <td className="px-4 py-3 text-muted">
+                <Link href={`/postings/${p.id}`} className="inline-flex max-w-[280px] items-center gap-1.5 text-foreground transition-colors hover:text-brand">
+                  <span className="truncate">{p.role}</span>
+                </Link>
+                <a href={p.url} target="_blank" rel="noreferrer" title="Open live posting" className="ml-1.5 inline-flex align-middle text-faint transition-colors hover:text-brand">
+                  <ExternalLink className="size-3.5 shrink-0 text-faint" />
+                </a>
+                {p.notes && <p className="mt-0.5 max-w-[300px] truncate text-xs text-faint">{p.notes}</p>}
+              </td>
+              <td className="px-4 py-3">
+                <Badge tone={scoreTone(p.score)}>{p.score || "—"}</Badge>
+              </td>
+              <td className="px-4 py-3">
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge tone="bad">expired</Badge>
+                  <Badge tone={pipelineStateTone(p.pipelineState)} className="capitalize">{p.pipelineState || "pending"}</Badge>
+                </div>
+              </td>
+              <td className="px-4 py-3 text-faint tabular-nums">{p.date || "—"}</td>
+              <td className="px-4 py-3 text-faint tabular-nums">{p.lastSeen || p.lastContact || "—"}</td>
+              <td className="px-4 py-3 text-muted">
+                <span className="inline-flex max-w-[190px] items-center gap-1.5">
+                  <MapPin className="size-3.5 shrink-0 text-faint" />
+                  <span className="truncate">{postingLocationText(p)}</span>
+                </span>
+              </td>
+              <td className="px-4 py-3 text-muted">
+                {p.payRange ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="tabular-nums">{p.payRange}</span>
+                    {p.paySource && <span className="rounded bg-surface-hover px-1 py-px text-[10px] uppercase text-faint">{p.paySource}</span>}
+                  </span>
+                ) : p.compensation ? (
+                  <span className="inline-block max-w-[180px] truncate text-faint">{p.compensation}</span>
+                ) : (
+                  <span className="text-faint">—</span>
+                )}
+              </td>
+              <td className="px-4 py-3 capitalize text-muted">{compactSource(p.source)}</td>
+              <td className="px-4 py-3 text-right">
+                <button
+                  type="button"
+                  onClick={() => void restore(p)}
+                  title="Restore to inbox"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand"
+                >
+                  <RotateCcw className="size-3.5" />
+                  Restore
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function LegacyExpiredPostingsTable({ postings }: { postings: InboxJob[] }) {
   const restore = async (posting: InboxJob) => {
     const res = await fetch("/api/postings/state", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: posting.id, url: posting.url, state: "pending" }),
+      body: JSON.stringify({ id: posting.id, url: posting.url, state: "pending", restore: true }),
     });
     if (res.ok) window.dispatchEvent(new CustomEvent("co-pipeline-changed"));
   };

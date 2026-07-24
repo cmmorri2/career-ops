@@ -243,6 +243,101 @@ export type PostingArtifact = {
   createdAt: string;
 };
 
+export type RoleDiscoveryLead = {
+  id: number;
+  clusterId: number;
+  source: string;
+  sourceDetail?: string;
+  seedCompany?: string;
+  seedTitle?: string;
+  company: string;
+  title: string;
+  location?: string;
+  workModel?: string;
+  url?: string;
+  triageScore?: number;
+  triageLabel?: string;
+  reviewStatus: string;
+  sourceReceivedAt?: string;
+};
+
+export type RoleDiscoverySearch = {
+  id: number;
+  clusterId: number;
+  query: string;
+  source: string;
+  targetCount: number;
+  status: string;
+  resultCount: number;
+  notes?: string;
+  results: RoleDiscoverySearchResult[];
+};
+
+export type RoleDiscoverySearchResult = {
+  id: number;
+  searchId: number;
+  clusterId: number;
+  url: string;
+  company: string;
+  title: string;
+  location?: string;
+  postedAt?: string;
+  ats?: string;
+  source: string;
+  matchedKeyword?: string;
+  note?: string;
+  reviewStatus: string;
+};
+
+export type RoleDiscoveryCluster = {
+  id: number;
+  normalizedRole: string;
+  displayRole: string;
+  reviewStatus: string;
+  coverageStatus: string;
+  evidenceCount: number;
+  linkedinCount: number;
+  pipelineMatchCount: number;
+  pipelineActiveCount: number;
+  pipelineShortlistedCount: number;
+  pipelineDiscardedCount: number;
+  pipelineExpiredCount: number;
+  applicationMatchCount: number;
+  bestScore?: number;
+  searchQuery?: string;
+  notes?: string;
+  leads: RoleDiscoveryLead[];
+  searches: RoleDiscoverySearch[];
+  pipelineMatches: RoleDiscoveryPipelineMatch[];
+};
+
+export type RoleDiscoveryPipelineMatch = {
+  id: number;
+  url: string;
+  company: string;
+  title: string;
+  location?: string;
+  pipelineState: string;
+  status: string;
+  score?: string;
+  notes?: string;
+};
+
+export type TitleTrendCluster = {
+  clusterKey: string;
+  clusterLabel: string;
+  count: number;
+  activeCount: number;
+  companies: string[];
+  examples: { company: string; title: string }[];
+};
+
+export type TitleTrendDay = {
+  date: string;
+  total: number;
+  clusters: TitleTrendCluster[];
+};
+
 const moneySpanRe = /~?(?:[$€£]|CHF ?|EUR ?|USD ?|GBP ?)\d[\d,]*(?:\.\d+)?[KkMm]?(?:\s*[-–]\s*(?:[$€£])?\d[\d,]*(?:\.\d+)?[KkMm]?)?/g;
 const moneyPartRe = /(\d[\d,]*(?:\.\d+)?)\s*([KkMm]?)/g;
 const isoDateRe = /\b20\d{2}-\d{2}-\d{2}\b/g;
@@ -424,6 +519,53 @@ function optionalNumber(value: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+const roleStopwords = new Set(["senior", "sr", "staff", "principal", "lead", "director", "head", "manager", "mgr", "associate", "level", "ii", "iii", "iv", "v", "remote", "usa", "us"]);
+
+function roleTokens(title: string): Set<string> {
+  return new Set(title.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter((token) => token && !roleStopwords.has(token)));
+}
+
+function hasAny(tokens: Set<string>, ...needles: string[]): boolean {
+  return needles.some((needle) => tokens.has(needle));
+}
+
+function normalizedRoleForTitle(title: string): string {
+  const tokens = roleTokens(title);
+  const hasAi = hasAny(tokens, "ai", "agentic", "agents", "genai", "ml", "machine", "conversational");
+  if (hasAi && hasAny(tokens, "product", "pm")) return "ai_product_management";
+  if (hasAi && hasAny(tokens, "solutions", "solution", "architect", "consultant", "consulting", "practitioner")) return "ai_solutions_architecture";
+  if (hasAny(tokens, "forward", "deployed")) return "forward_deployed_ai";
+  if (hasAny(tokens, "governance", "purview", "compliance")) return "data_governance";
+  if (hasAny(tokens, "identity", "entra", "iam", "security")) return "identity_security";
+  if (hasAny(tokens, "product", "pm")) return "product_management";
+  if (hasAny(tokens, "solutions", "solution", "architect", "consultant", "consulting")) return "solutions_architecture";
+  if (hasAny(tokens, "data", "analytics", "bi")) return "data_analytics";
+  if (hasAny(tokens, "platform", "infrastructure")) return "platform_engineering";
+  const key = [...tokens].sort().slice(0, 5).join("_");
+  return key || title.toLowerCase().replace(/[^a-z0-9]+/g, "") || "unknown_role";
+}
+
+function roleClusterLabel(key: string): string {
+  const labels: Record<string, string> = {
+    ai_product_management: "AI Product Management",
+    ai_solutions_architecture: "AI Solutions Architecture",
+    forward_deployed_ai: "Forward Deployed AI",
+    data_governance: "Data Governance",
+    identity_security: "Identity / Security",
+    product_management: "Product Management",
+    solutions_architecture: "Solutions Architecture",
+    data_analytics: "Data / Analytics",
+    platform_engineering: "Platform Engineering",
+    unknown_role: "Unknown Role",
+  };
+  if (labels[key]) return labels[key];
+  return key
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function readPostings(): PipelinePosting[] {
   if (!hasPostingDb()) return [];
   try {
@@ -464,6 +606,56 @@ export function readPostings(): PipelinePosting[] {
   } catch {
     return [];
   }
+}
+
+export function readTitleTrends(limitDates = 14, clustersPerDate = 8, examplesPerCluster = 3): TitleTrendDay[] {
+  const byDate = new Map<string, PipelinePosting[]>();
+  for (const posting of readPostings()) {
+    const date = posting.date?.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date)?.push(posting);
+  }
+
+  return [...byDate.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, limitDates)
+    .map(([date, postings]) => {
+      const byCluster = new Map<string, PipelinePosting[]>();
+      for (const posting of postings) {
+        const key = normalizedRoleForTitle(posting.role);
+        if (!byCluster.has(key)) byCluster.set(key, []);
+        byCluster.get(key)?.push(posting);
+      }
+
+      const clusters = [...byCluster.entries()]
+        .map(([clusterKey, rows]) => {
+          const companies = [...new Set(rows.map((r) => r.company).filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b))
+            .slice(0, 5);
+          const examples = rows
+            .slice()
+            .sort((a, b) => {
+              const scoreDelta = Number.parseFloat(b.score || "0") - Number.parseFloat(a.score || "0");
+              if (scoreDelta) return scoreDelta;
+              return `${a.company} ${a.role}`.localeCompare(`${b.company} ${b.role}`);
+            })
+            .slice(0, examplesPerCluster)
+            .map((r) => ({ company: r.company, title: r.role }));
+          return {
+            clusterKey,
+            clusterLabel: roleClusterLabel(clusterKey),
+            count: rows.length,
+            activeCount: rows.filter((r) => r.pipelineState === "pending" || r.pipelineState === "shortlisted").length,
+            companies,
+            examples,
+          };
+        })
+        .sort((a, b) => b.count - a.count || b.activeCount - a.activeCount || a.clusterLabel.localeCompare(b.clusterLabel))
+        .slice(0, clustersPerDate);
+
+      return { date, total: postings.length, clusters };
+    });
 }
 
 export function findPosting(id: string | number): PipelinePosting | null {
@@ -554,6 +746,170 @@ export function readPostingArtifacts(postingId: string | number): PostingArtifac
       path: String(r.path ?? ""),
       createdAt: String(r.created_at ?? ""),
     })).filter((a) => a.id && a.artifactType && a.path);
+  } catch {
+    return [];
+  }
+}
+
+export function readRoleDiscovery(): RoleDiscoveryCluster[] {
+  if (!hasPostingDb()) return [];
+  try {
+    const clusters = sqliteJson(`
+      SELECT id, normalized_role, display_role, review_status, coverage_status,
+             evidence_count, linkedin_count, pipeline_match_count,
+             pipeline_active_count, pipeline_shortlisted_count,
+             pipeline_discarded_count, pipeline_expired_count,
+             application_match_count, best_score, search_query, notes
+      FROM role_discovery_clusters
+      ORDER BY
+        CASE review_status
+          WHEN 'new' THEN 0
+          WHEN 'review' THEN 1
+          WHEN 'watching' THEN 2
+          WHEN 'promoted' THEN 3
+          ELSE 4
+        END,
+        CASE coverage_status WHEN 'under_covered' THEN 0 ELSE 1 END,
+        COALESCE(best_score, 0) DESC,
+        evidence_count DESC,
+        display_role COLLATE NOCASE
+    `);
+    const leads = sqliteJson(`
+      SELECT id, cluster_id, source, source_detail, seed_company, seed_title,
+             company, title, location, work_model, url, triage_score, triage_label,
+             review_status, source_received_at
+      FROM role_discovery_leads
+      ORDER BY COALESCE(triage_score, 0) DESC, company COLLATE NOCASE, title COLLATE NOCASE
+    `);
+    const searches = sqliteJson(`
+      SELECT id, cluster_id, query, source, target_count, status, result_count, notes
+      FROM role_discovery_searches
+      ORDER BY created_at DESC, id DESC
+    `);
+    const searchResults = sqliteJson(`
+      SELECT id, search_id, cluster_id, url, company, title, location, posted_at,
+             ats, source, matched_keyword, note, review_status
+      FROM role_discovery_search_results
+      ORDER BY created_at DESC, id DESC
+    `);
+    const pipelineRows = sqliteJson(`
+      SELECT id, url, company_name, title, location, pipeline_state, status, score, notes
+      FROM job_postings
+      ORDER BY
+        CASE pipeline_state
+          WHEN 'shortlisted' THEN 0
+          WHEN 'pending' THEN 1
+          WHEN 'discarded' THEN 2
+          WHEN 'expired' THEN 3
+          ELSE 4
+        END,
+        COALESCE(score, '') DESC,
+        company_name COLLATE NOCASE,
+        title COLLATE NOCASE
+    `);
+    const leadsByCluster = new Map<number, RoleDiscoveryLead[]>();
+    for (const r of leads) {
+      const clusterId = Number(r.cluster_id);
+      const row: RoleDiscoveryLead = {
+        id: Number(r.id),
+        clusterId,
+        source: String(r.source ?? ""),
+        sourceDetail: typeof r.source_detail === "string" && r.source_detail ? r.source_detail : undefined,
+        seedCompany: typeof r.seed_company === "string" && r.seed_company ? r.seed_company : undefined,
+        seedTitle: typeof r.seed_title === "string" && r.seed_title ? r.seed_title : undefined,
+        company: String(r.company ?? ""),
+        title: String(r.title ?? ""),
+        location: typeof r.location === "string" && r.location ? r.location : undefined,
+        workModel: typeof r.work_model === "string" && r.work_model ? r.work_model : undefined,
+        url: typeof r.url === "string" && r.url ? r.url : undefined,
+        triageScore: optionalNumber(r.triage_score),
+        triageLabel: typeof r.triage_label === "string" && r.triage_label ? r.triage_label : undefined,
+        reviewStatus: String(r.review_status ?? ""),
+        sourceReceivedAt: typeof r.source_received_at === "string" && r.source_received_at ? r.source_received_at : undefined,
+      };
+      if (!leadsByCluster.has(clusterId)) leadsByCluster.set(clusterId, []);
+      leadsByCluster.get(clusterId)?.push(row);
+    }
+    const searchesByCluster = new Map<number, RoleDiscoverySearch[]>();
+    const pipelineByRole = new Map<string, RoleDiscoveryPipelineMatch[]>();
+    for (const r of pipelineRows) {
+      const role = normalizedRoleForTitle(String(r.title ?? ""));
+      const row: RoleDiscoveryPipelineMatch = {
+        id: Number(r.id),
+        url: String(r.url ?? ""),
+        company: String(r.company_name ?? ""),
+        title: String(r.title ?? ""),
+        location: typeof r.location === "string" && r.location ? r.location : undefined,
+        pipelineState: String(r.pipeline_state ?? ""),
+        status: String(r.status ?? ""),
+        score: typeof r.score === "string" && r.score ? r.score : undefined,
+        notes: typeof r.notes === "string" && r.notes ? r.notes : undefined,
+      };
+      if (!pipelineByRole.has(role)) pipelineByRole.set(role, []);
+      pipelineByRole.get(role)?.push(row);
+    }
+    const resultsBySearch = new Map<number, RoleDiscoverySearchResult[]>();
+    for (const r of searchResults) {
+      const searchId = Number(r.search_id);
+      const row: RoleDiscoverySearchResult = {
+        id: Number(r.id),
+        searchId,
+        clusterId: Number(r.cluster_id),
+        url: String(r.url ?? ""),
+        company: String(r.company ?? ""),
+        title: String(r.title ?? ""),
+        location: typeof r.location === "string" && r.location ? r.location : undefined,
+        postedAt: typeof r.posted_at === "string" && r.posted_at ? r.posted_at : undefined,
+        ats: typeof r.ats === "string" && r.ats ? r.ats : undefined,
+        source: String(r.source ?? ""),
+        matchedKeyword: typeof r.matched_keyword === "string" && r.matched_keyword ? r.matched_keyword : undefined,
+        note: typeof r.note === "string" && r.note ? r.note : undefined,
+        reviewStatus: String(r.review_status ?? ""),
+      };
+      if (!resultsBySearch.has(searchId)) resultsBySearch.set(searchId, []);
+      resultsBySearch.get(searchId)?.push(row);
+    }
+    for (const r of searches) {
+      const clusterId = Number(r.cluster_id);
+      const id = Number(r.id);
+      const row: RoleDiscoverySearch = {
+        id,
+        clusterId,
+        query: String(r.query ?? ""),
+        source: String(r.source ?? ""),
+        targetCount: Number(r.target_count ?? 0),
+        status: String(r.status ?? ""),
+        resultCount: Number(r.result_count ?? 0),
+        notes: typeof r.notes === "string" && r.notes ? r.notes : undefined,
+        results: resultsBySearch.get(id) ?? [],
+      };
+      if (!searchesByCluster.has(clusterId)) searchesByCluster.set(clusterId, []);
+      searchesByCluster.get(clusterId)?.push(row);
+    }
+    return clusters.map((r) => {
+      const id = Number(r.id);
+      return {
+        id,
+        normalizedRole: String(r.normalized_role ?? ""),
+        displayRole: String(r.display_role ?? ""),
+        reviewStatus: String(r.review_status ?? ""),
+        coverageStatus: String(r.coverage_status ?? ""),
+        evidenceCount: Number(r.evidence_count ?? 0),
+        linkedinCount: Number(r.linkedin_count ?? 0),
+        pipelineMatchCount: Number(r.pipeline_match_count ?? 0),
+        pipelineActiveCount: Number(r.pipeline_active_count ?? 0),
+        pipelineShortlistedCount: Number(r.pipeline_shortlisted_count ?? 0),
+        pipelineDiscardedCount: Number(r.pipeline_discarded_count ?? 0),
+        pipelineExpiredCount: Number(r.pipeline_expired_count ?? 0),
+        applicationMatchCount: Number(r.application_match_count ?? 0),
+        bestScore: optionalNumber(r.best_score),
+        searchQuery: typeof r.search_query === "string" && r.search_query ? r.search_query : undefined,
+        notes: typeof r.notes === "string" && r.notes ? r.notes : undefined,
+        leads: leadsByCluster.get(id) ?? [],
+        searches: searchesByCluster.get(id) ?? [],
+        pipelineMatches: (pipelineByRole.get(String(r.normalized_role ?? "")) ?? []).slice(0, 8),
+      };
+    }).filter((r) => r.id && r.normalizedRole && r.displayRole);
   } catch {
     return [];
   }
